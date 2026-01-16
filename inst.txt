@@ -1,0 +1,4 @@
+This project is meant to push anti-cheat developers to update their detection logic. This is NOT just for hacking in game.
+All codes are open-source (or planned to be), anti-cheat developers can view all code.
+If you can see "src_EXT" or similar folder (EXCEPT "src"), you can reference source code in it, but remember to add credit in "credit.txt"
+You don't need to verify the code by compiling, since Gradle in this environement is broken, I have to use an external one.

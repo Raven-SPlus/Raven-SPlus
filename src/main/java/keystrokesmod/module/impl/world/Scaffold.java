@@ -161,6 +161,7 @@ public class Scaffold extends IAutoClicker {
                         .add(new LegitSprint("Legit", this))
                         .add(new SneakSprint("Sneak", this))
                         .add(new OldIntaveSprint("OldIntave", this))
+                        .add(new FairFightSprint("FairFight", this))
         );
         this.registerSetting(fast = new ButtonSetting("Fast", false, new ModeOnly(sprint, 3, 4, 5, 11)));
         this.registerSetting(precision = new ModeSetting("Precision", precisionModes, 4));
