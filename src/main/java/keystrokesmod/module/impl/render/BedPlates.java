@@ -28,7 +28,7 @@ import java.util.List;
 import static org.lwjgl.opengl.GL11.*;
 
 public class BedPlates extends Module {
-    public static final ShaderUtils roundedShader = new ShaderUtils("keystrokesmod:shaders/rrect.frag");
+    private static ShaderUtils roundedShader = null;
 
     public static SliderSetting updateRate, yShift, layers;
     private final CoolDown updateCooldown = new CoolDown(0);
@@ -219,21 +219,51 @@ public class BedPlates extends Module {
         });
     }
 
-    public static void drawRound(double x, double y, double width, double height, double radius, @NotNull Color color) {
-        GlStateManager.color(1, 1, 1, 1);
-        roundedShader.init();
-
-        setupRoundedRectUniforms(x, y, width, height, radius);
-        roundedShader.setUniformf("color", color.getRed() / 255f, color.getGreen() / 255f, color.getBlue() / 255f, color.getAlpha() / 255f);
-
-        ShaderUtils.drawQuads(x - 1, y - 1, width + 2, height + 2);
-        roundedShader.unload();
+    private static ShaderUtils getRoundedShader() {
+        if (roundedShader == null) {
+            try {
+                roundedShader = new ShaderUtils("keystrokesmod:shaders/rrect.frag");
+            } catch (Exception e) {
+                // Shader initialization failed, return null to use fallback rendering
+                return null;
+            }
+        }
+        return roundedShader;
     }
 
-    private static void setupRoundedRectUniforms(double x, double y, double width, double height, double radius) {
+    public static void drawRound(double x, double y, double width, double height, double radius, @NotNull Color color) {
+        GlStateManager.color(1, 1, 1, 1);
+        ShaderUtils shader = getRoundedShader();
+        
+        if (shader == null) {
+            // Fallback: draw a simple rectangle without rounded corners if shader fails
+            GlStateManager.enableBlend();
+            GlStateManager.blendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            GlStateManager.color(color.getRed() / 255f, color.getGreen() / 255f, color.getBlue() / 255f, color.getAlpha() / 255f);
+            glDisable(GL_TEXTURE_2D);
+            glBegin(GL_QUADS);
+            glVertex2d(x, y);
+            glVertex2d(x, y + height);
+            glVertex2d(x + width, y + height);
+            glVertex2d(x + width, y);
+            glEnd();
+            glEnable(GL_TEXTURE_2D);
+            GlStateManager.disableBlend();
+            return;
+        }
+        
+        shader.init();
+        setupRoundedRectUniforms(x, y, width, height, radius, shader);
+        shader.setUniformf("color", color.getRed() / 255f, color.getGreen() / 255f, color.getBlue() / 255f, color.getAlpha() / 255f);
+
+        ShaderUtils.drawQuads(x - 1, y - 1, width + 2, height + 2);
+        shader.unload();
+    }
+
+    private static void setupRoundedRectUniforms(double x, double y, double width, double height, double radius, ShaderUtils shader) {
         ScaledResolution sr = new ScaledResolution(mc);
-        BedPlates.roundedShader.setUniformf("location", x * sr.getScaleFactor(), (mc.displayHeight - (height * sr.getScaleFactor())) - (y * sr.getScaleFactor()));
-        BedPlates.roundedShader.setUniformf("rectSize", width * sr.getScaleFactor(), height * sr.getScaleFactor());
-        BedPlates.roundedShader.setUniformf("radius", radius * sr.getScaleFactor());
+        shader.setUniformf("location", x * sr.getScaleFactor(), (mc.displayHeight - (height * sr.getScaleFactor())) - (y * sr.getScaleFactor()));
+        shader.setUniformf("rectSize", width * sr.getScaleFactor(), height * sr.getScaleFactor());
+        shader.setUniformf("radius", radius * sr.getScaleFactor());
     }
 }

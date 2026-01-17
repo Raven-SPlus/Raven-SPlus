@@ -122,6 +122,8 @@ public class FairFightSprint extends IScaffoldSprint {
         sneakingTicks = 0;
         ticksSinceSneak = 0;
         
+        // Set both key binding state and pressed state for sneak to work properly
+        net.minecraft.client.settings.KeyBinding.setKeyBindState(mc.gameSettings.keyBindSneak.getKeyCode(), true);
         ((KeyBindingAccessor) mc.gameSettings.keyBindSneak).setPressed(true);
         
         // Optional: jump when starting sneak to bypass tower check
@@ -132,8 +134,10 @@ public class FairFightSprint extends IScaffoldSprint {
     
     private void stopSneak() {
         isSneaking = false;
-        ((KeyBindingAccessor) mc.gameSettings.keyBindSneak).setPressed(
-                Keyboard.isKeyDown(mc.gameSettings.keyBindSneak.getKeyCode()));
+        boolean wasHoldingSneak = Keyboard.isKeyDown(mc.gameSettings.keyBindSneak.getKeyCode());
+        // Restore both states
+        net.minecraft.client.settings.KeyBinding.setKeyBindState(mc.gameSettings.keyBindSneak.getKeyCode(), wasHoldingSneak);
+        ((KeyBindingAccessor) mc.gameSettings.keyBindSneak).setPressed(wasHoldingSneak);
     }
     
     private void calculateNextInterval() {

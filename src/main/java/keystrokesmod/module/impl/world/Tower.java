@@ -27,11 +27,20 @@ public class Tower extends Module {
         final ModeValue mode;
         this.registerSetting(mode = new ModeValue("Mode", this)
                 .add(new VanillaTower("Vanilla", this))
+                .add(new MotionJumpTower("MotionJump", this))
+                .add(new MotionTower("Motion", this))
+                .add(new ConstantMotionTower("ConstantMotion", this))
+                .add(new MotionTPTower("MotionTP", this))
+                .add(new PacketTower("Packet", this))
+                .add(new TeleportTower("Teleport", this))
                 .add(new JumpSprintTower("JumpSprint", this))
                 .add(new HypixelTower("Hypixel", this))
                 .add(new BlocksMCTower("BlocksMC", this))
-                .add(new ConstantMotionTower("ConstantMotion", this))
+                .add(new AAC339Tower("AAC3.3.9", this))
+                .add(new AAC364Tower("AAC3.6.4", this))
                 .add(new VulcanTower("Vulcan", this))
+                .add(new Vulcan290Tower("Vulcan2.9.0", this))
+                .add(new PulldownTower("Pulldown", this))
         );
 
         this.registerSetting(disableWhileCollided = new ButtonSetting("Disable while collided", false));
@@ -44,6 +53,10 @@ public class Tower extends Module {
         FMLCommonHandler.instance().bus().register(new Object(){
             @SubscribeEvent
             public void onUpdate(TickEvent.ClientTickEvent event) {
+                // Early return if no modules that use tower are enabled
+                if (!scaffold.isEnabled() && !ModuleManager.safeWalk.isEnabled()) {
+                    return;
+                }
                 final boolean curCanTower = canTower();
                 if (!curCanTower && lastTowering && stopMotion.isToggled())
                     MoveUtil.stop();

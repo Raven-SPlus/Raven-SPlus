@@ -38,9 +38,9 @@ public class Settings extends Module {
         this.registerSetting(weaponRod = new ButtonSetting("Set rod as weapon", false));
         this.registerSetting(weaponStick = new ButtonSetting("Set stick as weapon", false));
         this.registerSetting(new DescriptionSetting("Performance"));
-        this.registerSetting(smartAnimatedTextures = new ButtonSetting("Smart animated textures", true));
-        this.registerSetting(gpuUiRoundedRects = new ButtonSetting("GPU UI rounded rects", true));
-        this.registerSetting(gpu3DRendering = new ButtonSetting("GPU 3D rendering", true));
+        this.registerSetting(smartAnimatedTextures = new ButtonSetting("Smart animated textures", false));
+        this.registerSetting(gpuUiRoundedRects = new ButtonSetting("GPU UI rounded rects", false));
+        this.registerSetting(gpu3DRendering = new ButtonSetting("GPU 3D rendering", false));
         this.registerSetting(new DescriptionSetting("Profiles"));
         this.registerSetting(sendMessage = new ButtonSetting("Send message on enable", true));
         this.registerSetting(new DescriptionSetting("Theme colors"));

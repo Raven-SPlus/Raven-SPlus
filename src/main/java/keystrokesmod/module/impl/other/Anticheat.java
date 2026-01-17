@@ -3,6 +3,7 @@ package keystrokesmod.module.impl.other;
 import keystrokesmod.Raven;
 import keystrokesmod.module.Module;
 import keystrokesmod.module.impl.other.anticheats.PlayerManager;
+import keystrokesmod.module.impl.other.anticheats.utils.world.LevelUtils;
 import keystrokesmod.module.setting.impl.ButtonSetting;
 import keystrokesmod.module.setting.impl.DescriptionSetting;
 import keystrokesmod.module.setting.impl.ModeSetting;
@@ -82,11 +83,15 @@ public class Anticheat extends Module {
         if (e.entity == mc.thePlayer) {
             manager = null;
             manager = new PlayerManager();
+            // Clear cache when world changes
+            LevelUtils.clearCache();
         }
     }
 
     public void onDisable() {
         manager = null;
         manager = new PlayerManager();
+        // Clear cache when module is disabled
+        LevelUtils.clearCache();
     }
 }

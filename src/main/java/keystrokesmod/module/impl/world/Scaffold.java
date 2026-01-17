@@ -50,6 +50,7 @@ import java.util.concurrent.TimeUnit;
 public class Scaffold extends IAutoClicker {
     private final ModeValue clickMode;
     private final ButtonSetting alwaysPlaceIfPossible;
+    private final ModeSetting placementMode;
     private final SliderSetting aimSpeed;
     public final SliderSetting motion;
     private final ModeValue rotation;
@@ -94,7 +95,13 @@ public class Scaffold extends IAutoClicker {
     private final ButtonSetting grimSafe;
     private final ButtonSetting grimAlignRot;
     private final ButtonSetting grimLegitMotion;
+    private final ButtonSetting fairFightBypass;
     private final ButtonSetting antiDupRot;
+    private final ButtonSetting humanizeRotation;
+    private final SliderSetting jitterAmount;
+    private final ButtonSetting rotationVariance;
+    private final SliderSetting minRotationSpeed;
+    private final SliderSetting maxRotationSpeed;
 
     public @Nullable MovingObjectPosition rayCasted = null;
     public MovingObjectPosition placeBlock;
@@ -109,6 +116,7 @@ public class Scaffold extends IAutoClicker {
     private long lastAutoSwapMs = 0L;
     private double startPos = -1;
     private final Map<BlockPos, Timer> highlight = new HashMap<>();
+    private final Map<BlockPos, Integer> pendingPlacements = new HashMap<>(); // Track blocks waiting for placement confirmation (pos -> ticks since placement attempt)
     private boolean forceStrict;
     private boolean down;
     private boolean delay;
@@ -128,17 +136,29 @@ public class Scaffold extends IAutoClicker {
 
     public Scaffold() {
         super("Scaffold", category.world);
+        
+        // Click Mode
+        this.registerSetting(new DescriptionSetting("Click Mode"));
         this.registerSetting(clickMode = new ModeValue("Click mode", this)
                 .add(new LiteralSubMode("Basic", this))
                 .add(new NormalAutoClicker("Normal", this, false, true))
                 .setDefaultValue("Basic")
         );
-        this.registerSetting(alwaysPlaceIfPossible = new ButtonSetting("Always place if possible", false));
+        this.registerSetting(alwaysPlaceIfPossible = new ButtonSetting("Always place if possible", false, "Place blocks even when not aiming perfectly at them."));
+        
+        // Placement Mode
+        this.registerSetting(new DescriptionSetting("Placement Mode"));
+        this.registerSetting(placementMode = new ModeSetting("Placement mode", new String[]{"Packet", "Click"}, 0, "Packet: Direct packet placement. Click: Simulate mouse clicking."));
+        
+        // Rotation
+        this.registerSetting(new DescriptionSetting("Rotation"));
         this.registerSetting(rotation = new ModeValue("Rotation", this)
                 .add(new NoneRotation("None", this))
                 .add(new BackwardsRotation("Backwards", this))
                 .add(new StrictRotation("Strict", this))
                 .add(new PreciseRotation("Precise", this))
+                .add(new StabilizedRotation("Stabilized", this))
+                .add(new ReverseYawRotation("ReverseYaw", this))
                 .add(new SimpleTellyRotation("SimpleTelly", this))
                 .add(new TellyRotation("Telly", this))
                 .add(new ConstantRotation("Constant", this))
@@ -149,6 +169,29 @@ public class Scaffold extends IAutoClicker {
         this.registerSetting(moveFix = new ButtonSetting("MoveFix", false, new ModeOnly(rotation, 0).reserve()));
         this.registerSetting(motion = new SliderSetting("Motion", 1.0, 0.5, 1.2, 0.01, () -> !moveFix.isToggled()));
         this.registerSetting(strafe = new SliderSetting("Strafe", 0, -45, 45, 5));
+        this.registerSetting(rotateWithMovement = new ButtonSetting("Rotate with movement", true));
+        this.registerSetting(recycleRotation = new ButtonSetting("Recycle rotation", false));
+        
+        // Rotation Adjustments
+        this.registerSetting(new DescriptionSetting("Rotation Adjustments"));
+        this.registerSetting(staticYaw = new ButtonSetting("Static yaw", false));
+        this.registerSetting(reserveYaw = new ButtonSetting("Reserve yaw", false));
+        this.registerSetting(staticPitch = new ButtonSetting("Static pitch", false));
+        this.registerSetting(staticPitchOnJump = new ButtonSetting("Static pitch on jump", false, staticPitch::isToggled));
+        this.registerSetting(straightPitch = new SliderSetting("Straight pitch", 75.7, 45, 90, 0.1, staticPitch::isToggled));
+        this.registerSetting(diagonalPitch = new SliderSetting("Diagonal pitch", 75.6, 45, 90, 0.1, staticPitch::isToggled));
+        
+        // Rotation Humanization
+        this.registerSetting(new DescriptionSetting("Rotation Humanization"));
+        this.registerSetting(humanizeRotation = new ButtonSetting("Humanize rotation", false, "Add small random offsets to rotations to avoid 'Spin' flags."));
+        this.registerSetting(jitterAmount = new SliderSetting("Jitter amount", 0.5f, 0.0f, 2.0f, 0.1f, humanizeRotation::isToggled));
+        this.registerSetting(rotationVariance = new ButtonSetting("Rotation variance", false, humanizeRotation::isToggled, "Add slight variance to rotation speed."));
+        this.registerSetting(minRotationSpeed = new SliderSetting("Min rotation speed", 8.0f, 5.0f, 20.0f, 0.5f, rotationVariance::isToggled));
+        this.registerSetting(maxRotationSpeed = new SliderSetting("Max rotation speed", 10.0f, 5.0f, 20.0f, 0.5f, rotationVariance::isToggled));
+        this.registerSetting(antiDupRot = new ButtonSetting("Anti duplicate rot", false, "Tiny jitter to avoid DuplicateRotPlace; only used in non-Grim modes."));
+        
+        // Sprint
+        this.registerSetting(new DescriptionSetting("Sprint"));
         this.registerSetting(sprint = new ModeValue("Sprint", this)
                         .add(new DisabledSprint("Disabled", this))
                         .add(new VanillaSprint("Vanilla", this))
@@ -164,44 +207,51 @@ public class Scaffold extends IAutoClicker {
                         .add(new FairFightSprint("FairFight", this))
         );
         this.registerSetting(fast = new ButtonSetting("Fast", false, new ModeOnly(sprint, 3, 4, 5, 11)));
-        this.registerSetting(precision = new ModeSetting("Precision", precisionModes, 4));
         this.registerSetting(cancelSprint = new ButtonSetting("Cancel sprint", false, new ModeOnly(sprint, 0).reserve()));
+        
+        // Movement
+        this.registerSetting(new DescriptionSetting("Movement"));
+        this.registerSetting(precision = new ModeSetting("Precision", precisionModes, 4));
         this.registerSetting(legit = new ButtonSetting("Legit", false));
         this.registerSetting(hover = new ButtonSetting("Hover", false));
-        this.registerSetting(recycleRotation = new ButtonSetting("Recycle rotation", false));
+        this.registerSetting(safeWalk = new ButtonSetting("Safewalk", true));
         this.registerSetting(sneak = new ButtonSetting("Sneak", false));
         this.registerSetting(sneakEveryBlocks = new SliderSetting("Sneak every blocks", 0, 1, 10, 1, sneak::isToggled));
         this.registerSetting(sneakTime = new SliderSetting("Sneak time", 50, 0, 500, 10, "ms", sneak::isToggled));
         this.registerSetting(jump = new ButtonSetting("Jump", false));
         this.registerSetting(jumpEveryBlocks = new SliderSetting("Jump every blocks", 0, 1, 10, 1, jump::isToggled));
-        this.registerSetting(rotateWithMovement = new ButtonSetting("Rotate with movement", true));
-        this.registerSetting(staticYaw = new ButtonSetting("Static yaw", false));
-        this.registerSetting(reserveYaw = new ButtonSetting("Reserve yaw", false));
-        this.registerSetting(staticPitch = new ButtonSetting("Static pitch", false));
-        this.registerSetting(staticPitchOnJump = new ButtonSetting("Static pitch on jump", false, staticPitch::isToggled));
-        this.registerSetting(straightPitch = new SliderSetting("Straight pitch", 75.7, 45, 90, 0.1, staticPitch::isToggled));
-        this.registerSetting(diagonalPitch = new SliderSetting("Diagonal pitch", 75.6, 45, 90, 0.1, staticPitch::isToggled));
-        this.registerSetting(autoSwap = new ButtonSetting("AutoSwap", true));
-        this.registerSetting(useBiggestStack = new ButtonSetting("Use biggest stack", true, autoSwap::isToggled));
-        this.registerSetting(delayOnJump = new ButtonSetting("Delay on jump", true));
-        this.registerSetting(fastOnRMB = new ButtonSetting("Fast on RMB", false));
-        this.registerSetting(highlightBlocks = new ButtonSetting("Highlight blocks", true));
-        this.registerSetting(multiPlace = new ButtonSetting("Multi-place", false));
-        this.registerSetting(safeWalk = new ButtonSetting("Safewalk", true));
-        this.registerSetting(showBlockCount = new ButtonSetting("Show block count", true));
-        this.registerSetting(silentSwing = new ButtonSetting("Silent swing", false));
-        this.registerSetting(noSwing = new ButtonSetting("No swing", false, silentSwing::isToggled));
+        this.registerSetting(autoJump = new ButtonSetting("Auto jump", false));
         this.registerSetting(tower = new ButtonSetting("Tower", false));
         this.registerSetting(sameY = new ButtonSetting("SameY", false));
-        this.registerSetting(autoJump = new ButtonSetting("Auto jump", false));
+        
+        // Placement
+        this.registerSetting(new DescriptionSetting("Placement"));
         this.registerSetting(expand = new ButtonSetting("Expand", false));
         this.registerSetting(expandDistance = new SliderSetting("Expand distance", 4.5, 0, 10, 0.1, expand::isToggled));
         this.registerSetting(polar = new ButtonSetting("Polar", false, expand::isToggled));
+        this.registerSetting(multiPlace = new ButtonSetting("Multi-place", false));
         this.registerSetting(postPlace = new ButtonSetting("Post place", false, "Place on PostUpdate."));
+        this.registerSetting(delayOnJump = new ButtonSetting("Delay on jump", true));
+        this.registerSetting(fastOnRMB = new ButtonSetting("Fast on RMB", false));
+        
+        // Inventory
+        this.registerSetting(new DescriptionSetting("Inventory"));
+        this.registerSetting(autoSwap = new ButtonSetting("AutoSwap", true));
+        this.registerSetting(useBiggestStack = new ButtonSetting("Use biggest stack", true, autoSwap::isToggled));
+        
+        // Visual
+        this.registerSetting(new DescriptionSetting("Visual"));
+        this.registerSetting(highlightBlocks = new ButtonSetting("Highlight blocks", true));
+        this.registerSetting(showBlockCount = new ButtonSetting("Show block count", true));
+        this.registerSetting(silentSwing = new ButtonSetting("Silent swing", false));
+        this.registerSetting(noSwing = new ButtonSetting("No swing", false, silentSwing::isToggled));
+        
+        // Anti-Cheat
+        this.registerSetting(new DescriptionSetting("Anti-Cheat"));
         this.registerSetting(grimSafe = new ButtonSetting("Grim safe", true, "Disable motion boosts that can cause simulation flags."));
         this.registerSetting(grimAlignRot = new ButtonSetting("Grim align rotation", true, "Force scaffold look at the target block for Grim RotationPlace."));
         this.registerSetting(grimLegitMotion = new ButtonSetting("Grim legit motion", false, "Keep movement fully vanilla while scaffolding (no motion edits / forced jumps)."));
-        this.registerSetting(antiDupRot = new ButtonSetting("Anti duplicate rot", false, "Tiny jitter to avoid DuplicateRotPlace; only used in non-Grim modes."));
+        this.registerSetting(fairFightBypass = new ButtonSetting("FairFight bypass", false, "Add rotation variance and placement timing to bypass Scaffold C & G."));
     }
 
     public void onDisable() {
@@ -216,6 +266,7 @@ public class Scaffold extends IAutoClicker {
         }
         delay = false;
         highlight.clear();
+        pendingPlacements.clear();
         at = index = 0;
         add = 0;
         startPos = -1;
@@ -276,7 +327,13 @@ public class Scaffold extends IAutoClicker {
             lastPitch = event.getPitch();
         }
 
-        boolean instant = aimSpeed.getInput() == aimSpeed.getMax();
+        // Apply rotation speed variance (KillAura tech)
+        boolean isInstant = aimSpeed.getInput() == aimSpeed.getMax();
+        float rotationSpeed = (float) aimSpeed.getInput();
+        if (humanizeRotation.isToggled() && rotationVariance.isToggled() && !isInstant) {
+            rotationSpeed = (float) Utils.randomizeDouble(minRotationSpeed.getInput(), maxRotationSpeed.getInput());
+            isInstant = rotationSpeed >= aimSpeed.getMax();
+        }
 
         // Tiny jitter now only for non-Grim modes; GrimRotation handles its own nudge.
         boolean precisionSensitive = rotation.getSelected().getPrettyName().equalsIgnoreCase("Precise")
@@ -285,6 +342,44 @@ public class Scaffold extends IAutoClicker {
             float jitter = (float) (Utils.randomizeInt(-2, 2) / 100.0); // ±0.02°
             yaw += jitter;
             pitch += jitter / 2f;
+        }
+
+        // Apply KillAura-style humanization (to avoid Spin flags)
+        if (humanizeRotation.isToggled() && !grimAlignActive && rayCasted != null) {
+            // Get mouse GCD for sensitivity-aligned jitter
+            float sens = mc.gameSettings.mouseSensitivity * 0.6f + 0.2f;
+            double gcd = sens * sens * sens * 1.2;
+            
+            // Apply jitter based on configured amount, aligned to mouse GCD
+            float jitterAmountValue = (float) jitterAmount.getInput();
+            if (jitterAmountValue > 0) {
+                // Random jitter within GCD-aligned range
+                float jitterRange = (float) (gcd * jitterAmountValue * 2.0);
+                float yawJitter = (float) ((Math.random() - 0.5) * jitterRange);
+                float pitchJitter = (float) ((Math.random() - 0.5) * jitterRange * 0.5); // Less pitch jitter
+                
+                // Quantize to GCD to avoid sensitivity checks
+                yawJitter = (float) (Math.round(yawJitter / gcd) * gcd);
+                pitchJitter = (float) (Math.round(pitchJitter / gcd) * gcd);
+                
+                yaw += yawJitter;
+                pitch += pitchJitter;
+                
+                // Add slight pitch variation when yaw changes significantly (KillAura tech)
+                float yawDiff = Math.abs(MathHelper.wrapAngleTo180_float(yaw - lastYaw));
+                if (yawDiff >= 2.8f && Math.abs(pitchJitter) < 0.05f && MoveUtil.isMoving()) {
+                    pitch += (float) ((Math.random() > 0.5 ? gcd : -gcd) * 0.5);
+                }
+            }
+            
+            // Avoid duplicate rotations with GCD-aligned nudge (KillAura tech)
+            float yawDiff = Math.abs(MathHelper.wrapAngleTo180_float(yaw - lastYaw));
+            float pitchDiff = Math.abs(pitch - lastPitch);
+            if (yawDiff < 1e-3 && pitchDiff < 1e-3 && rayCasted != null) {
+                float nudge = (float) gcd;
+                yaw += nudge;
+                pitch += nudge * 0.5f;
+            }
         }
 
         // For Grim RotationPlace, force looking directly at the target block.
@@ -319,8 +414,8 @@ public class Scaffold extends IAutoClicker {
             }
         }
 
-        float finalYaw = instant ? yaw : AimSimulator.rotMove(yaw, lastYaw, (float) aimSpeed.getInput());
-        float finalPitch = instant ? pitch : AimSimulator.rotMove(pitch, lastPitch, (float) aimSpeed.getInput());
+        float finalYaw = isInstant ? yaw : AimSimulator.rotMove(yaw, lastYaw, rotationSpeed);
+        float finalPitch = isInstant ? pitch : AimSimulator.rotMove(pitch, lastPitch, rotationSpeed);
 
         event.setYaw(lastYaw = finalYaw);
         event.setPitch(lastPitch = finalPitch);
@@ -332,7 +427,13 @@ public class Scaffold extends IAutoClicker {
 
     @Override
     public boolean click() {
+        // Mark for placement - the action() method will call place() with the target block
         place = true;
+        
+        // When using Click placement mode with NormalAutoClicker, the click timing
+        // is handled by the autoclicker's pattern. The actual click simulation
+        // happens in place() method when placementMode is Click.
+        
         if (legit.isToggled()) {
             Utils.sendClick(1, true);
             Utils.sendClick(1, false);
@@ -404,6 +505,28 @@ public class Scaffold extends IAutoClicker {
 
     @SubscribeEvent(priority = EventPriority.HIGH)
     public void onPreUpdate(PreUpdateEvent event) {
+        // Clean up old pending placements that were never confirmed (placement likely failed)
+        if (!pendingPlacements.isEmpty()) {
+            Iterator<Map.Entry<BlockPos, Integer>> pendingIterator = pendingPlacements.entrySet().iterator();
+            while (pendingIterator.hasNext()) {
+                Map.Entry<BlockPos, Integer> entry = pendingIterator.next();
+                BlockPos pending = entry.getKey();
+                int ticks = entry.getValue() + 1;
+                
+                // If still replaceable after 5 ticks, placement likely failed - remove it
+                if (ticks > 5 && BlockUtils.replaceable(pending)) {
+                    pendingIterator.remove();
+                } else {
+                    entry.setValue(ticks);
+                }
+            }
+        }
+        
+        // FairFight Scaffold G bypass: Add occasional small delay to reduce perfect placement timing
+        if (fairFightBypass.isToggled() && !postPlace.isToggled() && place && Utils.randomizeInt(1, 100) <= 5) {
+            // 5% chance to skip placement this tick (reduces success ratio for Scaffold G)
+            return;
+        }
         if (!postPlace.isToggled())
             action();
     }
@@ -654,9 +777,29 @@ public class Scaffold extends IAutoClicker {
 
             if (rayCasted == null) {
                 if (!isGrimMode && alwaysPlaceIfPossible.isToggled()) {
+                    // Try to find any valid block to place on near the target position
                     MovingObjectPosition hitResult = RotationUtils.rayCast(4.5, RotationHandler.getRotationYaw(), RotationHandler.getRotationPitch());
-                    if (hitResult == null) return;
-                    placeBlock = hitResult;
+                    if (hitResult == null || hitResult.typeOfHit != MovingObjectPosition.MovingObjectType.BLOCK) {
+                        // If no direct hit, try to find a placeable position near target
+                        if (targetPos != null) {
+                            Optional<Triple<BlockPos, EnumFacing, keystrokesmod.script.classes.Vec3>> placeSide = RotationUtils.getPlaceSide(targetPos);
+                            if (placeSide.isPresent()) {
+                                Triple<BlockPos, EnumFacing, keystrokesmod.script.classes.Vec3> side = placeSide.get();
+                                if (heldItem.getItem() instanceof ItemBlock && 
+                                    ((ItemBlock) heldItem.getItem()).canPlaceBlockOnSide(mc.theWorld, side.getLeft(), side.getMiddle(), mc.thePlayer, heldItem)) {
+                                    placeBlock = new MovingObjectPosition(side.getRight().toVec3(), side.getMiddle(), side.getLeft());
+                                } else {
+                                    return;
+                                }
+                            } else {
+                                return;
+                            }
+                        } else {
+                            return;
+                        }
+                    } else {
+                        placeBlock = hitResult;
+                    }
                 } else {
                     return; // In Grim we require the traced block; otherwise only place when we have one
                 }
@@ -785,6 +928,25 @@ public class Scaffold extends IAutoClicker {
     }
 
     @SubscribeEvent
+    public void onBlockPlace(BlockPlaceEvent event) {
+        // Verify blocks were actually placed (for Click mode)
+        // When a block is placed, check if any pending placements match
+        if (!pendingPlacements.isEmpty() && highlightBlocks.isToggled() && Utils.nullCheck()) {
+            // Check all pending placements - if block is no longer replaceable, it was placed
+            Iterator<Map.Entry<BlockPos, Integer>> pendingIterator = pendingPlacements.entrySet().iterator();
+            while (pendingIterator.hasNext()) {
+                Map.Entry<BlockPos, Integer> entry = pendingIterator.next();
+                BlockPos pending = entry.getKey();
+                // Verify the block was actually placed by checking if it's no longer replaceable
+                if (!BlockUtils.replaceable(pending)) {
+                    highlight.put(pending, null);
+                    pendingIterator.remove();
+                }
+            }
+        }
+    }
+
+    @SubscribeEvent
     public void onRenderWorld(RenderWorldLastEvent e) {
         if (!Utils.nullCheck() || !highlightBlocks.isToggled() || highlight.isEmpty()) {
             return;
@@ -893,6 +1055,13 @@ public class Scaffold extends IAutoClicker {
             }
         }
 
+        // Add variance to avoid FairFight Scaffold C detection (perfect angles)
+        // Add small random offset between -2.5 and 2.5 degrees to break perfect angle patterns
+        if (fairFightBypass.isToggled() || sprint.getSelected().getPrettyName().equalsIgnoreCase("FairFight")) {
+            float variance = (float) Utils.randomizeGaussian(0.0, 1.2, -2.5, 2.5);
+            yaw += variance;
+        }
+
         return mc.thePlayer.rotationYaw + yaw;
     }
 
@@ -934,8 +1103,15 @@ public class Scaffold extends IAutoClicker {
         if (!isGrimLegitMotion() && sneak.isToggled()) {
             if (sneak$bridged >= sneakEveryBlocks.getInput()) {
                 sneak$bridged = 0;
+                // Set both key binding state and pressed state for sneak to work
+                KeyBinding.setKeyBindState(mc.gameSettings.keyBindSneak.getKeyCode(), true);
                 ((KeyBindingAccessor) mc.gameSettings.keyBindSneak).setPressed(true);
-                Raven.getExecutor().schedule(() -> ((KeyBindingAccessor) mc.gameSettings.keyBindSneak).setPressed(Keyboard.isKeyDown(mc.gameSettings.keyBindSneak.getKeyCode())), (long) sneakTime.getInput(), TimeUnit.MILLISECONDS);
+                // Restore original state after sneak time
+                final boolean wasHoldingSneak = Keyboard.isKeyDown(mc.gameSettings.keyBindSneak.getKeyCode());
+                Raven.getExecutor().schedule(() -> {
+                    KeyBinding.setKeyBindState(mc.gameSettings.keyBindSneak.getKeyCode(), wasHoldingSneak);
+                    ((KeyBindingAccessor) mc.gameSettings.keyBindSneak).setPressed(wasHoldingSneak);
+                }, (long) sneakTime.getInput(), TimeUnit.MILLISECONDS);
             }
         }
 
@@ -963,7 +1139,32 @@ public class Scaffold extends IAutoClicker {
         block = event.getHitResult();
         extra = event.isExtra();
 
-        if (mc.playerController.onPlayerRightClick(mc.thePlayer, mc.theWorld, heldItem, block.getBlockPos(), block.sideHit, block.hitVec)) {
+        boolean placed = false;
+        BlockPos targetPlacePos = block.getBlockPos().offset(block.sideHit);
+        
+        // Check placement mode: Click or Packet
+        if (placementMode.getInput() == 1) {
+            // Click mode: Simulate mouse clicking
+            // Use Utils.sendClick() to simulate RMB click, Minecraft will handle placement naturally
+            // The click simulation triggers Minecraft's rightClickMouse() which processes the placement
+            Utils.sendClick(1, true);
+            Utils.sendClick(1, false);
+            // For Click mode, we can't immediately verify placement, so track it for BlockPlaceEvent
+            // Only add to highlight when BlockPlaceEvent confirms the placement
+            if (!extra) {
+                pendingPlacements.put(targetPlacePos, 0);
+            }
+            placed = true; // Assume success for other logic (sneak/jump counters)
+        } else {
+            // Packet mode: Direct packet placement (current behavior)
+            placed = mc.playerController.onPlayerRightClick(mc.thePlayer, mc.theWorld, heldItem, block.getBlockPos(), block.sideHit, block.hitVec);
+            // Only highlight when placement actually succeeded (verified by return value)
+            if (placed && !extra) {
+                highlight.put(targetPlacePos, null);
+            }
+        }
+        
+        if (placed) {
             sneak$bridged++;
             jump$bridged++;
             if (silentSwing.isToggled()) {
@@ -971,9 +1172,6 @@ public class Scaffold extends IAutoClicker {
                     PacketUtils.sendPacket(new C0APacketAnimation());
             } else {
                 mc.thePlayer.swingItem();
-            }
-            if (!extra) {
-                highlight.put(block.getBlockPos().offset(block.sideHit), null);
             }
         }
     }

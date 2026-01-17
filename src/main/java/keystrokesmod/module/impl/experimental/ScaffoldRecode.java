@@ -5,19 +5,15 @@
  */
 package keystrokesmod.module.impl.experimental;
 
-import keystrokesmod.event.PreUpdateEvent;
-import keystrokesmod.event.PostUpdateEvent;
-import keystrokesmod.event.SafeWalkEvent;
+import keystrokesmod.event.*;
+import keystrokesmod.module.ModuleManager;
+import keystrokesmod.utility.MoveUtil;
 import keystrokesmod.module.Module;
 import keystrokesmod.module.impl.other.RotationHandler;
 import keystrokesmod.module.impl.other.SlotHandler;
-import keystrokesmod.module.impl.other.anticheats.utils.world.PlayerRotation;
 import keystrokesmod.module.setting.impl.*;
 import keystrokesmod.mixins.impl.client.KeyBindingAccessor;
-import keystrokesmod.mixins.impl.client.MinecraftAccessor;
-import keystrokesmod.mixins.impl.client.PlayerControllerMPAccessor;
 import keystrokesmod.utility.BlockUtils;
-import keystrokesmod.utility.Reflection;
 import keystrokesmod.utility.RotationUtils;
 import keystrokesmod.utility.TimerUtil;
 import keystrokesmod.utility.Utils;
@@ -25,17 +21,15 @@ import net.minecraft.block.Block;
 import net.minecraft.block.BlockAir;
 import net.minecraft.block.BlockBush;
 import net.minecraft.client.settings.GameSettings;
-import net.minecraft.init.Blocks;
 import net.minecraft.item.ItemBlock;
 import net.minecraft.item.ItemStack;
 import net.minecraft.network.play.client.C0APacketAnimation;
 import net.minecraft.network.play.client.C0BPacketEntityAction;
+import net.minecraft.network.play.client.C03PacketPlayer;
+import net.minecraft.network.Packet;
+import net.minecraft.stats.StatList;
 import net.minecraft.util.*;
-import net.minecraft.world.WorldSettings;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
-import org.apache.commons.lang3.tuple.Triple;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
@@ -216,6 +210,8 @@ public class ScaffoldRecode extends Module {
     private boolean isTowering = false;
     private double jumpGround = 0.0;
     private final TimerUtil towerTickTimer = new TimerUtil();
+    private boolean slotModifiedThisTick = false;
+    private int lastPlacementTick = -1;
     
     public ScaffoldRecode() {
         super("ScaffoldRecode", category.experimental, "Full feature FDPClient Scaffold copy");
@@ -370,6 +366,9 @@ public class ScaffoldRecode extends Module {
             return;
         }
         
+        // Reset slot modification flag at start of tick
+        slotModifiedThisTick = false;
+        
         Utils.getTimer().timerSpeed = (float) timer.getInput();
         
         // Telly jump ticks
@@ -436,13 +435,15 @@ public class ScaffoldRecode extends Module {
             return;
         }
         
-        if (alreadyPlaced) {
+        // Change/Schedule slot once per tick according to vanilla-logic
+        if (alreadyPlaced || slotModifiedThisTick) {
             return;
         }
         
         boolean raycastProperly = !(scaffoldMode.getInput() == 2 && expandLength.getInput() > 1 || shouldGoDown()) 
             && rotationsActive();
         
+        // Match FDPClient's onTick logic: place if rotations are off OR raycast matches target
         if (!rotationsActive() || (raycast != null && raycast.getBlockPos().equals(target.blockPos) 
             && (!raycastProperly || raycast.sideHit == target.enumFacing))) {
             PlaceInfo result = raycastProperly && raycast != null ? 
@@ -460,6 +461,137 @@ public class ScaffoldRecode extends Module {
         if (airSafe.isToggled() || mc.thePlayer.onGround) {
             event.setSafeWalk(true);
         }
+    }
+    
+    // ========== TOWER EVENT HANDLERS ==========
+    
+    @SubscribeEvent
+    public void onPostMotion(PostMotionEvent event) {
+        if (!Utils.nullCheck() || mc.thePlayer == null) return;
+        
+        isTowering = false;
+        
+        if (towerMode.getInput() == 0 || 
+            (towerNotOnMove.isToggled() && MoveUtil.isMoving()) ||
+            (towerOnJump.isToggled() && !mc.gameSettings.keyBindJump.isKeyDown())) {
+            return;
+        }
+        
+        isTowering = true;
+        
+        // Timer update handled by hasTimeElapsed checks
+        
+        if (!stopWhenBlockAbove.isToggled() || 
+            BlockUtils.getBlock(new BlockPos(mc.thePlayer).up(2)) instanceof BlockAir) {
+            moveTower();
+        }
+        
+        BlockPos blockPos = new BlockPos(mc.thePlayer).down();
+        if (BlockUtils.replaceable(blockPos)) {
+            search(blockPos, !shouldGoDown(), searchMode.getInput() == 0, false);
+        }
+    }
+    
+    @SubscribeEvent
+    public void onJump(JumpEvent event) {
+        if (!towerOnJump.isToggled()) return;
+        
+        if (isGodBridgeEnabled() && jumpAutomatically.isToggled() || !shouldJumpOnInput()) {
+            return;
+        }
+        
+        if (towerMode.getInput() == 0 || towerMode.getInput() == 1) { // None or Jump
+            return;
+        }
+        
+        if (towerNotOnMove.isToggled() && MoveUtil.isMoving()) {
+            return;
+        }
+        
+        // Check if Speed or Fly modules are active
+        try {
+            if (ModuleManager.speed != null && ModuleManager.speed.isEnabled()) {
+                return;
+            }
+            if (ModuleManager.fly != null && ModuleManager.fly.isEnabled()) {
+                return;
+            }
+        } catch (Exception ignored) {}
+        
+        event.setCanceled(true);
+    }
+    
+    @SubscribeEvent
+    public void onSendPacket(SendPacketEvent event) {
+        if (mc.thePlayer == null) return;
+        
+        Packet<?> packet = event.getPacket();
+        
+        if (towerMode.getInput() == 10 && // Vulcan2.9.0
+            packet instanceof C03PacketPlayer.C04PacketPlayerPosition &&
+            !MoveUtil.isMoving() && mc.thePlayer.ticksExisted % 2 == 0) {
+            C03PacketPlayer.C04PacketPlayerPosition posPacket = (C03PacketPlayer.C04PacketPlayerPosition) packet;
+            // Modify packet position using reflection - create new packet with modified position
+            try {
+                double newX = posPacket.getPositionX() + 0.1;
+                double newZ = posPacket.getPositionZ() + 0.1;
+                C03PacketPlayer.C04PacketPlayerPosition newPacket = new C03PacketPlayer.C04PacketPlayerPosition(
+                    newX, posPacket.getPositionY(), newZ, posPacket.isOnGround()
+                );
+                event.setPacket(newPacket);
+            } catch (Exception ignored) {}
+        }
+    }
+    
+    // ========== MISSING EVENT HANDLERS ==========
+    
+    @SubscribeEvent
+    public void onStrafe(PrePlayerInputEvent event) {
+        if (mc.thePlayer == null) return;
+        
+        // Telly mode jumping - needs to be done here to avoid detection
+        if (scaffoldMode.getInput() == 3 && // Telly
+            mc.thePlayer.onGround && 
+            MoveUtil.isMoving() &&
+            getCurrentRotation().yaw == mc.thePlayer.rotationYaw &&
+            getCurrentRotation().pitch == mc.thePlayer.rotationPitch &&
+            ticksUntilJump >= jumpTicks) {
+            mc.thePlayer.jump();
+            ticksUntilJump = 0;
+            jumpTicks = randomRange((int)jumpTicksMin.getInput(), (int)jumpTicksMax.getInput());
+        }
+    }
+    
+    @SubscribeEvent
+    public void onMovementInput(MoveInputEvent event) {
+        if (mc.thePlayer == null) return;
+        
+        if (!isGodBridgeEnabled() || !mc.thePlayer.onGround) return;
+        
+        if (waitForRots.isToggled() && godBridgeTargetRotation != null) {
+            float rotationDiff = rotationDifference(godBridgeTargetRotation, getCurrentRotation());
+            // Simplified fixed angle delta check
+            if (rotationDiff > 5.0f) {
+                event.setSneak(true);
+            }
+        }
+        
+        // Simplified simulated player check for GodBridge jump
+        if ((!mc.thePlayer.onGround && !isManualJumpOptionActive()) || 
+            blocksPlacedUntilJump > blocksToJump) {
+            event.setJump(true);
+            blocksPlacedUntilJump = 0;
+            blocksToJump = randomRange((int)blocksToJumpMin.getInput(), (int)blocksToJumpMax.getInput());
+        }
+    }
+    
+    @SubscribeEvent
+    public void onSneakSlowDown(MoveInputEvent event) {
+        if (!isEagleEnabled() || eagle.getInput() != 0) { // Not Normal eagle
+            return;
+        }
+        
+        event.setSneakSlowDownMultiplier((eagleSpeed.getInput() / 0.3f) * event.getSneakSlowDownMultiplier());
     }
     
     // ========== CORE METHODS ==========
@@ -736,10 +868,17 @@ public class ScaffoldRecode extends Module {
             if (autoBlock.getInput() != 0) {
                 if (autoBlock.getInput() == 1) { // Pick
                     mc.thePlayer.inventory.currentItem = blockSlot;
+                    slotModifiedThisTick = true;
                 } else if (autoBlock.getInput() == 2) { // Spoof
                     SlotHandler.setCurrentSlot(blockSlot);
+                    slotModifiedThisTick = true;
                 }
             }
+        }
+        
+        // Check if we already placed this tick
+        if (lastPlacementTick == mc.thePlayer.ticksExisted) {
+            return;
         }
         
         tryToPlaceBlock(stack, placeInfo.blockPos, placeInfo.enumFacing, placeInfo.vec3);
@@ -762,6 +901,7 @@ public class ScaffoldRecode extends Module {
         
         if (clickedSuccessfully) {
             delayTimer.reset();
+            lastPlacementTick = mc.thePlayer.ticksExisted;
             
             if (mc.thePlayer.onGround) {
                 mc.thePlayer.motionX *= speedModifier.getInput();
@@ -834,6 +974,166 @@ public class ScaffoldRecode extends Module {
         }
         
         return tryToPlaceBlock(stack, raytrace.getBlockPos(), raytrace.sideHit, raytrace.hitVec);
+    }
+    
+    // ========== TOWER METHODS ==========
+    
+    private void fakeJump() {
+        if (mc.thePlayer == null) return;
+        mc.thePlayer.isAirBorne = true;
+        mc.thePlayer.triggerAchievement(StatList.jumpStat);
+    }
+    
+    private void moveTower() {
+        if (mc.thePlayer == null) return;
+        
+        if (blocksAmount() <= 0) return;
+        
+        String mode = towerMode.getOptions()[(int)towerMode.getInput()].toLowerCase();
+        
+        switch (mode) {
+            case "jump":
+                if (mc.thePlayer.onGround && towerTickTimer.hasTimeElapsed((long)jumpDelay.getInput() * 50)) {
+                    fakeJump();
+                    mc.thePlayer.jump();
+                } else if (!mc.thePlayer.onGround) {
+                    mc.thePlayer.isAirBorne = false;
+                    towerTickTimer.reset();
+                }
+                break;
+                
+            case "motion":
+                if (mc.thePlayer.onGround) {
+                    fakeJump();
+                    mc.thePlayer.motionY = 0.42;
+                } else if (mc.thePlayer.motionY < 0.1) {
+                    mc.thePlayer.motionY = -0.3;
+                }
+                break;
+                
+            case "motionjump":
+                if (mc.thePlayer.onGround && towerTickTimer.hasTimeElapsed((long)jumpDelay.getInput() * 50)) {
+                    fakeJump();
+                    mc.thePlayer.motionY = jumpMotion.getInput();
+                    towerTickTimer.reset();
+                }
+                break;
+                
+            case "motiontp":
+                if (mc.thePlayer.onGround) {
+                    fakeJump();
+                    mc.thePlayer.motionY = 0.42;
+                } else if (mc.thePlayer.motionY < 0.23) {
+                    mc.thePlayer.setPosition(mc.thePlayer.posX, Math.floor(mc.thePlayer.posY), mc.thePlayer.posZ);
+                }
+                break;
+                
+            case "packet":
+                if (mc.thePlayer.onGround && towerTickTimer.hasTimeElapsed(100)) {
+                    fakeJump();
+                    mc.getNetHandler().addToSendQueue(new C03PacketPlayer.C04PacketPlayerPosition(
+                        mc.thePlayer.posX,
+                        mc.thePlayer.posY + 0.42,
+                        mc.thePlayer.posZ,
+                        false
+                    ));
+                    mc.getNetHandler().addToSendQueue(new C03PacketPlayer.C04PacketPlayerPosition(
+                        mc.thePlayer.posX,
+                        mc.thePlayer.posY + 0.753,
+                        mc.thePlayer.posZ,
+                        false
+                    ));
+                    mc.thePlayer.setPosition(mc.thePlayer.posX, mc.thePlayer.posY + 1.0, mc.thePlayer.posZ);
+                    towerTickTimer.reset();
+                }
+                break;
+                
+            case "teleport":
+                if (teleportNoMotion.isToggled()) {
+                    mc.thePlayer.motionY = 0.0;
+                }
+                if ((mc.thePlayer.onGround || !teleportGround.isToggled()) && 
+                    towerTickTimer.hasTimeElapsed((long)teleportDelay.getInput() * 50)) {
+                    fakeJump();
+                    mc.thePlayer.setPositionAndUpdate(
+                        mc.thePlayer.posX, 
+                        mc.thePlayer.posY + teleportHeight.getInput(), 
+                        mc.thePlayer.posZ
+                    );
+                    towerTickTimer.reset();
+                }
+                break;
+                
+            case "constantmotion":
+                if (mc.thePlayer.onGround) {
+                    if (jumpPacket.isToggled()) {
+                        fakeJump();
+                    }
+                    jumpGround = mc.thePlayer.posY;
+                    mc.thePlayer.motionY = constantMotion.getInput();
+                }
+                if (mc.thePlayer.posY > jumpGround + constantMotionJumpGround.getInput()) {
+                    if (jumpPacket.isToggled()) {
+                        fakeJump();
+                    }
+                    mc.thePlayer.setPosition(
+                        mc.thePlayer.posX, 
+                        Math.floor(mc.thePlayer.posY), 
+                        mc.thePlayer.posZ
+                    );
+                    mc.thePlayer.motionY = constantMotion.getInput();
+                    jumpGround = mc.thePlayer.posY;
+                }
+                break;
+                
+            case "pulldown":
+                if (!mc.thePlayer.onGround && mc.thePlayer.motionY < triggerMotion.getInput()) {
+                    mc.thePlayer.motionY = -dragMotion.getInput();
+                } else {
+                    fakeJump();
+                }
+                break;
+                
+            case "vulcan2.9.0":
+                if (mc.thePlayer.ticksExisted % 10 == 0) {
+                    // Prevent Flight Flag
+                    mc.thePlayer.motionY = -0.1;
+                    return;
+                }
+                fakeJump();
+                if (mc.thePlayer.ticksExisted % 2 == 0) {
+                    mc.thePlayer.motionY = 0.7;
+                } else {
+                    mc.thePlayer.motionY = MoveUtil.isMoving() ? 0.42 : 0.6;
+                }
+                break;
+                
+            case "aac3.3.9":
+                if (mc.thePlayer.onGround) {
+                    fakeJump();
+                    mc.thePlayer.motionY = 0.4001;
+                }
+                Utils.getTimer().timerSpeed = 1f;
+                if (mc.thePlayer.motionY < 0) {
+                    mc.thePlayer.motionY -= 0.00000945;
+                    Utils.getTimer().timerSpeed = 1.6f;
+                }
+                break;
+                
+            case "aac3.6.4":
+                if (mc.thePlayer.ticksExisted % 4 == 1) {
+                    mc.thePlayer.motionY = 0.4195464;
+                    mc.thePlayer.setPosition(mc.thePlayer.posX - 0.035, mc.thePlayer.posY, mc.thePlayer.posZ);
+                } else if (mc.thePlayer.ticksExisted % 4 == 0) {
+                    mc.thePlayer.motionY = -0.5;
+                    mc.thePlayer.setPosition(mc.thePlayer.posX + 0.035, mc.thePlayer.posY, mc.thePlayer.posZ);
+                }
+                break;
+        }
+    }
+    
+    private boolean isManualJumpOptionActive() {
+        return scaffoldMode.getInput() == 4 && !jumpAutomatically.isToggled();
     }
     
     // ========== HELPER METHODS ==========

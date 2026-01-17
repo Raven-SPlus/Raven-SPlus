@@ -19,8 +19,6 @@ public class Velocity extends Module {
                 .add(new GrimACVelocity("GrimAC", this))
                 .add(new TickVelocity("Tick", this))
                 .add(new ZipVelocity("7-Zip", this))
-                .add(new FairFightVelocity("FairFight", this))
-                .add(new FairFightNewVelocity("FF-New", this))
         );
     }
 

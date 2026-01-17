@@ -13,6 +13,7 @@ import org.jetbrains.annotations.NotNull;
 import java.util.Arrays;
 import java.util.ConcurrentModificationException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.UUID;
 
 public class PlayerManager {
@@ -27,11 +28,21 @@ public class PlayerManager {
 
     public void update(@NotNull Minecraft client) {
         if (client.theWorld == null || client.thePlayer == null) return;
-        activeMap.forEach((uuid, aBoolean) -> activeMap.replace(uuid, false));
+        
+        // Optimize: Use traditional loop instead of forEach lambda to reduce overhead
+        for (UUID uuid : activeMap.keySet()) {
+            activeMap.replace(uuid, false);
+        }
 
         // Iterate active players
         try {
-            for (AbstractClientPlayer player : LevelUtils.getPlayers()) {
+            List<AbstractClientPlayer> players = LevelUtils.getPlayers();
+            // Early return if no players to process
+            if (players.isEmpty()) {
+                return;
+            }
+            
+            for (AbstractClientPlayer player : players) {
                 final UUID uuid = player.getUniqueID();
                 if (AntiBot.isBot(player)) {
                     activeMap.remove(uuid);
