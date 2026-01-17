@@ -46,6 +46,7 @@ run/
 .cursor/
 .run/
 .github/
+!.github/workflows/
 
 # Unnecessary files
 src_AC/
