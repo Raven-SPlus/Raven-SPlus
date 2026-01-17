@@ -104,7 +104,7 @@ public class Watermark extends Module {
                 String text = "";
                 switch ((int) watermarkText.getInput()) {
                     case 0:
-                        text = "§r§9§lRaven §bA§f+ §7";
+                        text = "§r§9§lRaven §bS§f+ §7";
                         break;
                     case 1:
                         text = customName;
