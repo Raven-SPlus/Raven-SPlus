@@ -848,7 +848,7 @@ public class Scaffold extends IAutoClicker {
     }
 
     public Vec3 getPlacePossibility(double offsetY, double original) { // rise
-        List<Vec3> possibilities = new ArrayList<>();
+        List<Vec3> possibilities = new ArrayList<>(200);
         int range = 5;
         for (int x = -range; x <= range; ++x) {
             for (int y = -range; y <= range; ++y) {
@@ -869,15 +869,19 @@ public class Scaffold extends IAutoClicker {
             }
         }
 
+        final double playerX = mc.thePlayer.posX;
+        final double playerY = mc.thePlayer.posY;
+        final double playerZ = mc.thePlayer.posZ;
+        final double checkY = keepYPosition() ? original : mc.thePlayer.posY;
         possibilities.removeIf(vec3 -> mc.thePlayer.getDistance(vec3.xCoord, vec3.yCoord, vec3.zCoord) > 5);
 
         if (possibilities.isEmpty()) {
             return null;
         }
         possibilities.sort(Comparator.comparingDouble(vec3 -> {
-            final double d0 = (mc.thePlayer.posX) - vec3.xCoord;
-            final double d1 = ((keepYPosition() ? original : mc.thePlayer.posY) - 1 + offsetY) - vec3.yCoord;
-            final double d2 = (mc.thePlayer.posZ) - vec3.zCoord;
+            final double d0 = playerX - vec3.xCoord;
+            final double d1 = (checkY - 1 + offsetY) - vec3.yCoord;
+            final double d2 = playerZ - vec3.zCoord;
             return MathHelper.sqrt_double(d0 * d0 + d1 * d1 + d2 * d2);
         }));
 

@@ -289,21 +289,18 @@ public class FairFightNewVelocity extends SubMode<Velocity> {
     private boolean isNearWall() {
         if (mc.thePlayer == null) return false;
         
-        double px = mc.thePlayer.posX;
-        double py = mc.thePlayer.posY;
-        double pz = mc.thePlayer.posZ;
+        int px = (int) Math.floor(mc.thePlayer.posX);
+        int py = (int) Math.floor(mc.thePlayer.posY);
+        int pz = (int) Math.floor(mc.thePlayer.posZ);
         
-        // FairFight uses cuboid 0.300001 expansion for nearWall check
-        for (double yOff = 0; yOff <= 1.8; yOff += 0.9) {
-            for (double xOff = -0.35; xOff <= 0.35; xOff += 0.7) {
-                for (double zOff = -0.35; zOff <= 0.35; zOff += 0.7) {
-                    if (xOff == 0 && zOff == 0) continue;
-                    
-                    BlockPos pos = new BlockPos(px + xOff, py + yOff, pz + zOff);
-                    Block block = BlockUtils.getBlock(pos);
-                    if (block != Blocks.air && !BlockUtils.isFluid(block)) {
-                        return true;
-                    }
+        int[][] offsets = {{0, 0}, {1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        
+        for (int yOff = 0; yOff <= 1; yOff++) {
+            for (int[] off : offsets) {
+                BlockPos pos = new BlockPos(px + off[0], py + yOff, pz + off[1]);
+                Block block = BlockUtils.getBlock(pos);
+                if (block != Blocks.air && !BlockUtils.isFluid(block)) {
+                    return true;
                 }
             }
         }
@@ -313,34 +310,33 @@ public class FairFightNewVelocity extends SubMode<Velocity> {
     private void nudgeTowardsWall() {
         if (mc.thePlayer == null || !MoveUtil.isMoving()) return;
 
-        double px = mc.thePlayer.posX;
-        double py = mc.thePlayer.posY;
-        double pz = mc.thePlayer.posZ;
+        int px = (int) Math.floor(mc.thePlayer.posX);
+        int py = (int) Math.floor(mc.thePlayer.posY);
+        int pz = (int) Math.floor(mc.thePlayer.posZ);
 
         double nearestDist = Double.MAX_VALUE;
         double nudgeX = 0.0;
         double nudgeZ = 0.0;
 
-        for (int xDir = -1; xDir <= 1; xDir++) {
-            for (int zDir = -1; zDir <= 1; zDir++) {
-                if (xDir == 0 && zDir == 0) continue;
-
-                for (double dist = 0.3; dist <= 2.0; dist += 0.5) {
-                    BlockPos checkPos = new BlockPos(px + xDir * dist, py, pz + zDir * dist);
-                    Block block = BlockUtils.getBlock(checkPos);
-                    if (block != Blocks.air && !BlockUtils.isFluid(block)) {
-                        if (dist < nearestDist) {
-                            nearestDist = dist;
-                            nudgeX = xDir * 0.02;
-                            nudgeZ = zDir * 0.02;
-                        }
-                        break;
+        int[][] directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}, {-1, -1}, {-1, 1}, {1, -1}, {1, 1}};
+        
+        for (int[] dir : directions) {
+            for (int dist = 1; dist <= 4; dist++) {
+                BlockPos checkPos = new BlockPos(px + dir[0] * dist, py, pz + dir[1] * dist);
+                Block block = BlockUtils.getBlock(checkPos);
+                if (block != Blocks.air && !BlockUtils.isFluid(block)) {
+                    double actualDist = dist;
+                    if (actualDist < nearestDist) {
+                        nearestDist = actualDist;
+                        nudgeX = dir[0] * 0.02;
+                        nudgeZ = dir[1] * 0.02;
                     }
+                    break;
                 }
             }
         }
 
-        if (nearestDist < 1.5) {
+        if (nearestDist < 3.0) {
             mc.thePlayer.motionX += nudgeX;
             mc.thePlayer.motionZ += nudgeZ;
         }

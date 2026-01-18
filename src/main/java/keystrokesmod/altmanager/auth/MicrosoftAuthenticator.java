@@ -4,6 +4,7 @@ import java.io.UnsupportedEncodingException;
 import java.net.*;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -21,7 +22,9 @@ import keystrokesmod.altmanager.auth.model.response.MinecraftLoginResponse;
 import keystrokesmod.altmanager.auth.model.response.MinecraftProfile;
 import keystrokesmod.altmanager.auth.model.response.MinecraftStoreResponse;
 import keystrokesmod.altmanager.auth.model.response.XboxLoginResponse;
+
 public class MicrosoftAuthenticator {
+    private static final Map<String, Pattern> patternCache = Collections.synchronizedMap(new HashMap<>());
     public static final String MICROSOFT_AUTHORIZATION_ENDPOINT = "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize";
     public static final String MICROSOFT_TOKEN_ENDPOINT = "https://login.live.com/oauth20_token.srf";
     public static final String MICROSOFT_REDIRECTION_ENDPOINT = "https://login.live.com/oauth20_desktop.srf";
@@ -238,7 +241,8 @@ public class MicrosoftAuthenticator {
     }
 
     protected String match(String regex, String content) {
-        Matcher matcher = Pattern.compile(regex).matcher(content);
+        Pattern pattern = patternCache.computeIfAbsent(regex, Pattern::compile);
+        Matcher matcher = pattern.matcher(content);
         if (!matcher.find()) {
             return null;
         }

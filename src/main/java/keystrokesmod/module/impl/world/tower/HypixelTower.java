@@ -130,7 +130,17 @@ public class HypixelTower extends SubMode<Tower> {
     }
 
     public static boolean negativeExpand(double negativeExpandValue) {
-        return mc.theWorld.getBlockState(new BlockPos(mc.thePlayer.posX + negativeExpandValue, mc.thePlayer.posY - 1.0, mc.thePlayer.posZ + negativeExpandValue)).getBlock() instanceof BlockAir && mc.theWorld.getBlockState(new BlockPos(mc.thePlayer.posX - negativeExpandValue, mc.thePlayer.posY - 1.0, mc.thePlayer.posZ - negativeExpandValue)).getBlock() instanceof BlockAir && mc.theWorld.getBlockState(new BlockPos(mc.thePlayer.posX - negativeExpandValue, mc.thePlayer.posY - 1.0, mc.thePlayer.posZ)).getBlock() instanceof BlockAir && mc.theWorld.getBlockState(new BlockPos(mc.thePlayer.posX + negativeExpandValue, mc.thePlayer.posY - 1.0, mc.thePlayer.posZ)).getBlock() instanceof BlockAir && mc.theWorld.getBlockState(new BlockPos(mc.thePlayer.posX, mc.thePlayer.posY - 1.0, mc.thePlayer.posZ + negativeExpandValue)).getBlock() instanceof BlockAir && mc.theWorld.getBlockState(new BlockPos(mc.thePlayer.posX, mc.thePlayer.posY - 1.0, mc.thePlayer.posZ - negativeExpandValue)).getBlock() instanceof BlockAir;
+        final double px = mc.thePlayer.posX;
+        final double py = mc.thePlayer.posY - 1.0;
+        final double pz = mc.thePlayer.posZ;
+        final double val = negativeExpandValue;
+        
+        return mc.theWorld.getBlockState(new BlockPos(px + val, py, pz + val)).getBlock() instanceof BlockAir 
+            && mc.theWorld.getBlockState(new BlockPos(px - val, py, pz - val)).getBlock() instanceof BlockAir 
+            && mc.theWorld.getBlockState(new BlockPos(px - val, py, pz)).getBlock() instanceof BlockAir 
+            && mc.theWorld.getBlockState(new BlockPos(px + val, py, pz)).getBlock() instanceof BlockAir 
+            && mc.theWorld.getBlockState(new BlockPos(px, py, pz + val)).getBlock() instanceof BlockAir 
+            && mc.theWorld.getBlockState(new BlockPos(px, py, pz - val)).getBlock() instanceof BlockAir;
     }
 
     private double randomAmount() {

@@ -402,7 +402,7 @@ public class Utils {
 
     public static String generateRandomString(final int n) {
         final char[] array = "abcdefghijklmnopqrstuvwxyz0123456789".toCharArray();
-        final StringBuilder sb = new StringBuilder();
+        final StringBuilder sb = new StringBuilder(n);
         IntStream.range(0, n).forEach(p2 -> sb.append(array[rand.nextInt(array.length)]));
         return sb.toString();
     }
@@ -429,8 +429,9 @@ public class Utils {
     } // I'm not sure how to handle it, such as Proxy IP.
 
     public static boolean isCraftiGames() {
-        return !mc.isSingleplayer() && mc.getCurrentServerData() != null
-                && (mc.getCurrentServerData().serverIP.contains("pika-network.net") || mc.getCurrentServerData().serverIP.contains("pikasys.net") || mc.getCurrentServerData().serverIP.contains("pika.host") || mc.getCurrentServerData().serverIP.contains("jartexsys.net") || mc.getCurrentServerData().serverIP.contains("jartexnetwork.com"));
+        if (mc.isSingleplayer() || mc.getCurrentServerData() == null) return false;
+        String ip = mc.getCurrentServerData().serverIP;
+        return ip.startsWith("pika") || ip.contains("jartex");
     }
 
     public static net.minecraft.util.Timer getTimer() {
