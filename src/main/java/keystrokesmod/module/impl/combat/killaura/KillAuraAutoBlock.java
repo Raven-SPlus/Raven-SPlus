@@ -56,6 +56,7 @@ public class KillAuraAutoBlock {
         if (parent.autoBlockMode.getInput() == 9 && ModuleManager.blink != null) {
             ModuleManager.blink.stopUsingSilently(parent);
         }
+        swapped = false;
     }
     
     public void updateBlockState(EntityLivingBase target, double distance) {
@@ -103,24 +104,8 @@ public class KillAuraAutoBlock {
                 Reflection.setButton(1, down);
                 blocking = down;
                 break;
-            case 9: // Hypixel - uses Blink silently
-                setBlockState(block.get(), false, false);
-                // Use Blink silently when blocking starts
-                if (block.get() && ModuleManager.blink != null) {
-                    if (!blinking) {
-                        boolean blinkWasEnabled = ModuleManager.blink.isEnabled();
-                        if (!blinkWasEnabled) {
-                            ModuleManager.blink.useSilently(parent);
-                        }
-                        blinking = true;
-                    }
-                } else if (!block.get() && blinking && ModuleManager.blink != null) {
-                    // Stop using Blink silently when blocking ends (if not enabled normally)
-                    if (!ModuleManager.blink.isEnabled()) {
-                        ModuleManager.blink.stopUsingSilently(parent);
-                    }
-                    blinking = false;
-                }
+            case 9: // Hypixel
+                setBlockState(false, false, false);
                 break;
         }
         if (block.get()) {
@@ -155,25 +140,53 @@ public class KillAuraAutoBlock {
 
     public void resetBlinkState(boolean unblock) {
         if (!Utils.nullCheck()) return;
+        
+        // Handle Hypixel autoblock - 2-tick sequence
+        if (parent.autoBlockMode.getInput() == 9 && block.get()) {
+            switch (hypixelAutoblockState) {
+                case 0:
+                    // First tick: start blinking, swap to a random slot, swap back, unblock (if blocking)
+                    if (ModuleManager.blink != null && !blinking) {
+                        boolean blinkWasEnabled = ModuleManager.blink.isEnabled();
+                        if (!blinkWasEnabled) {
+                            ModuleManager.blink.useSilently(parent);
+                        }
+                        blinking = true;
+                    }
+                    
+                    int randomSlot = (int) (Math.random() * 9);
+                    mc.thePlayer.sendQueue.addToSendQueue(new C09PacketHeldItemChange(randomSlot));
+                    mc.thePlayer.sendQueue.addToSendQueue(new C09PacketHeldItemChange(mc.thePlayer.inventory.currentItem));
+                    
+                    if (blocking) {
+                        unBlock();
+                    }
+                    
+                    hypixelAutoblockState = 1;
+                    return;
+                case 1:
+                    // Second tick: attack, block, stop blinking (all blink should be silent call)
+                    sendBlock();
+                    blocking = Reflection.setBlocking(true);
+                    
+                    if (blinking && ModuleManager.blink != null) {
+                        ModuleManager.blink.stopUsingSilently(parent);
+                        blinking = false;
+                    }
+                    
+                    hypixelAutoblockState = 0;
+                    releasePackets();
+                    return;
+            }
+        }
+        
         releasePackets();
         blocking = false;
         
-        // Handle Hypixel autoblock reset
-        if (parent.autoBlockMode.getInput() == 9) {
-            if (hypixelAutoblockState == 0 && blocking) {
-                mc.thePlayer.sendQueue.addToSendQueue(new C09PacketHeldItemChange((mc.thePlayer.inventory.currentItem + 1) % 9));
-                unBlock();
-                swapped = true;
-                hypixelAutoblockState++;
-            } else {
-                hypixelAutoblockState = 0;
-            }
-            
-            // Stop using Blink silently when resetting
-            if (blinking && ModuleManager.blink != null && !ModuleManager.blink.isEnabled()) {
-                ModuleManager.blink.stopUsingSilently(parent);
-                blinking = false;
-            }
+        // Stop using Blink silently for non-Hypixel modes
+        if (parent.autoBlockMode.getInput() != 9 && blinking && ModuleManager.blink != null && !ModuleManager.blink.isEnabled()) {
+            ModuleManager.blink.stopUsingSilently(parent);
+            blinking = false;
         }
         
         if (Raven.badPacketsHandler.playerSlot != mc.thePlayer.inventory.currentItem && swapped) {

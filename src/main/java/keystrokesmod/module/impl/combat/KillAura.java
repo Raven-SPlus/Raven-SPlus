@@ -599,6 +599,12 @@ public class KillAura extends IAutoClicker {
         
         // Handle attack and interact
         if (attack) {
+            // Hypixel mode: cancel attack if blocking state doesn't allow
+            if (autoBlockMode.getInput() == 9 && autoBlock.hypixelAutoblockState != 1) {
+                autoBlock.resetBlinkState(true);
+                attack = false;
+                return;
+            }
             autoBlock.resetBlinkState(true);
             attack = false;
             if (rotationAlgorithmMode != null && rotationAlgorithmMode.getInput() == 3 && !rotation.isGrimReady()) return;
@@ -814,6 +820,10 @@ public class KillAura extends IAutoClicker {
         if (useAutoClickerSettings.isToggled() && ModuleManager.autoClicker != null && ModuleManager.autoClicker.isEnabled()) {
             if (target != null && mc.thePlayer.getDistanceToEntity(target) <= swingRange.getInput()) {
                 if (mc.currentScreen == null && HitSelect.canAttack()) {
+                    // Hypixel mode: cancel attack if blocking state doesn't allow
+                    if (autoBlockMode.getInput() == 9 && autoBlock.hypixelAutoblockState != 1) {
+                        return false;
+                    }
                     Utils.sendClick(0, true);
                     if (swing) attack = true;
                     return true;
