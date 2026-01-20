@@ -1,5 +1,6 @@
 package keystrokesmod.module.impl.player.nofall;
 
+import keystrokesmod.event.PostUpdateEvent;
 import keystrokesmod.event.SendPacketEvent;
 import keystrokesmod.module.impl.player.NoFall;
 import keystrokesmod.module.setting.impl.SubMode;

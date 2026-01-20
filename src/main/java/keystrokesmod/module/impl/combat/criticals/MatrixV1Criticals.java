@@ -1,5 +1,6 @@
 package keystrokesmod.module.impl.combat.criticals;
 
+import keystrokesmod.mixins.impl.entity.EntityAccessor;
 import keystrokesmod.module.impl.combat.Criticals;
 import keystrokesmod.module.setting.impl.SliderSetting;
 import keystrokesmod.module.setting.impl.SubMode;
@@ -32,7 +33,7 @@ public class MatrixV1Criticals extends SubMode<Criticals> {
             if (currentTime - lastAttackTime < delay.getInput()) return;
             if (entity.hurtTime > hurtTime.getInput()) return;
 
-            if (!mc.thePlayer.onGround || mc.thePlayer.isOnLadder() || mc.thePlayer.isInWeb() 
+            if (!mc.thePlayer.onGround || mc.thePlayer.isOnLadder() || ((EntityAccessor) mc.thePlayer).isInWeb()
                 || mc.thePlayer.isInWater() || mc.thePlayer.isInLava() || mc.thePlayer.ridingEntity != null) {
                 return;
             }
