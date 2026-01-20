@@ -15,6 +15,11 @@ public class Criticals extends Module {
                 .add(new JumpCriticals("Jump", this))
                 .add(new LagCriticals("Lag", this))
                 .add(new HypixelCriticals("Hypixel", this))
+                .add(new MatrixV1Criticals("MatrixV1", this))
+                .add(new MatrixV2Criticals("MatrixV2", this))
+                .add(new MatrixDamageCriticals("MatrixDamage", this))
+                .add(new MatrixSmartCriticals("MatrixSmart", this))
+                .add(new MatrixSemiCriticals("MatrixSemi", this))
         );
     }
 
