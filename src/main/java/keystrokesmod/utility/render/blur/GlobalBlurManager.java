@@ -1,18 +1,13 @@
 package keystrokesmod.utility.render.blur;
 
 import keystrokesmod.utility.render.ColorUtils;
-import keystrokesmod.utility.render.RenderUtils;
-import net.minecraft.client.renderer.GlStateManager;
-import net.minecraft.client.shader.Framebuffer;
 import net.minecraft.client.settings.GameSettings;
 import org.jetbrains.annotations.Range;
 import java.lang.reflect.Field;
-import java.nio.FloatBuffer;
 
 import static keystrokesmod.Raven.mc;
 import static keystrokesmod.utility.render.blur.StencilUtil.checkSetupFBO;
 import static org.lwjgl.opengl.GL11.*;
-import static org.lwjgl.opengl.GL20.glUniform1;
 
 /**
  * Global high-efficiency blur manager that batches blur operations
@@ -24,12 +19,8 @@ import static org.lwjgl.opengl.GL20.glUniform1;
  * 3. Call endBlur() once at the end to apply blur to all elements
  */
 public class GlobalBlurManager {
-    
-    private static final ShaderUtil gaussianBlur = new ShaderUtil("keystrokesmod:shaders/gaussian.frag");
-    
-    // Framebuffers for blur (reused across frames for efficiency)
-    private static Framebuffer blurFBO1 = new Framebuffer(1, 1, false);
-    private static Framebuffer blurFBO2 = new Framebuffer(1, 1, false);
+
+    private static final KawaseBlur kawaseBlur = new KawaseBlur();
     
     private static boolean blurActive = false;
     private static int currentBlurRadius = 0;
@@ -84,11 +75,10 @@ public class GlobalBlurManager {
         
         // Read stencil buffer - this sets up stencil test to only render where stencil = 1
         StencilUtil.readStencilBuffer(1);
-        
+
         currentBlurRadius = radius;
         currentCompression = compression;
 
-        // Skip costly passes when blur wouldn't be visible
         if (radius <= 0 || compression <= 0) {
             StencilUtil.uninitStencilBuffer();
             ColorUtils.resetColor();
@@ -97,50 +87,18 @@ public class GlobalBlurManager {
             mc.mcProfiler.endSection();
             return;
         }
-        
-        // Ensure framebuffers are properly sized (reused for efficiency)
-        blurFBO1 = RenderUtils.createFrameBuffer(blurFBO1);
-        blurFBO2 = RenderUtils.createFrameBuffer(blurFBO2);
-        
-        // Step 1: Apply horizontal blur pass
-        blurFBO1.framebufferClear();
-        blurFBO1.bindFramebuffer(false);
-        gaussianBlur.init();
-        setupUniforms(compression, 0, radius, mc.displayWidth, mc.displayHeight);
-        RenderUtils.bindTexture(mc.getFramebuffer().framebufferTexture);
-        ShaderUtil.drawQuads();
-        blurFBO1.unbindFramebuffer();
-        gaussianBlur.unload();
-        
-        // Step 2: Apply vertical blur pass
-        mc.getFramebuffer().bindFramebuffer(false);
-        gaussianBlur.init();
-        setupUniforms(0, compression, radius, mc.displayWidth, mc.displayHeight);
-        RenderUtils.bindTexture(blurFBO1.framebufferTexture);
-        ShaderUtil.drawQuads();
-        gaussianBlur.unload();
-        
-        // Cleanup
+
+        int iterations = Math.max(1, Math.min(6, radius / 4));
+        int offset = (int) compression;
+
+        KawaseBlur.renderBlur(mc.getFramebuffer().framebufferTexture, iterations, offset);
+
         StencilUtil.uninitStencilBuffer();
         ColorUtils.resetColor();
         GlStateManager.bindTexture(0);
-        
+
         blurActive = false;
         mc.mcProfiler.endSection();
-    }
-    
-    /**
-     * Setup shader uniforms
-     */
-    private static void setupUniforms(float dir1, float dir2, @Range(from = 0, to = 64) int radius, 
-                                      int width, int height) {
-        gaussianBlur.setUniformi("textureIn", 0);
-        gaussianBlur.setUniformf("texelSize", 1.0F / (float) width, 1.0F / (float) height);
-        gaussianBlur.setUniformf("direction", dir1, dir2);
-        gaussianBlur.setUniformf("radius", radius);
-        
-        FloatBuffer weightBuffer = BlurKernelCache.getWeights(radius);
-        glUniform1(gaussianBlur.getUniform("weights"), weightBuffer);
     }
     
     /**
@@ -186,14 +144,8 @@ public class GlobalBlurManager {
      * Cleanup framebuffers (call on game shutdown)
      */
     public static void cleanup() {
-        if (blurFBO1 != null) {
-            blurFBO1.deleteFramebuffer();
-            blurFBO1 = null;
-        }
-        if (blurFBO2 != null) {
-            blurFBO2.deleteFramebuffer();
-            blurFBO2 = null;
-        }
+        KawaseBlur.framebufferList.forEach(Framebuffer::deleteFramebuffer);
+        KawaseBlur.framebufferList.clear();
     }
 }
 
