@@ -1,5 +1,6 @@
 package keystrokesmod.utility.render.blur;
 
+import keystrokesmod.utility.render.ColorUtils;
 import keystrokesmod.utility.render.GLUtil;
 import keystrokesmod.utility.render.RenderUtils;
 import net.minecraft.client.renderer.GlStateManager;
@@ -117,7 +118,7 @@ public class KawaseBlur {
         renderBlur(mc.getFramebuffer().framebufferTexture, iterations, offset);
 
         StencilUtil.uninitStencilBuffer();
-        RenderUtils.resetColor();
+        ColorUtils.resetColor();
         GlStateManager.bindTexture(0);
     }
 
