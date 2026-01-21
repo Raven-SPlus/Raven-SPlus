@@ -1,6 +1,9 @@
 package keystrokesmod.utility.render.blur;
 
 import keystrokesmod.utility.render.ColorUtils;
+import keystrokesmod.utility.render.RenderUtils;
+import net.minecraft.client.renderer.GlStateManager;
+import net.minecraft.client.shader.Framebuffer;
 import net.minecraft.client.settings.GameSettings;
 import org.jetbrains.annotations.Range;
 import java.lang.reflect.Field;
@@ -144,8 +147,7 @@ public class GlobalBlurManager {
      * Cleanup framebuffers (call on game shutdown)
      */
     public static void cleanup() {
-        KawaseBlur.framebufferList.forEach(Framebuffer::deleteFramebuffer);
-        KawaseBlur.framebufferList.clear();
+        KawaseBlur.cleanup();
     }
 }
 

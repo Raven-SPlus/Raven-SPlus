@@ -40,8 +40,8 @@ public class KawaseBlur {
             Framebuffer currentBuffer = new Framebuffer((int) (mc.displayWidth / Math.pow(2, i)), (int) (mc.displayHeight / Math.pow(2, i)), false);
             currentBuffer.setFramebufferFilter(GL_LINEAR);
             GlStateManager.bindTexture(currentBuffer.framebufferTexture);
-            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, GL11.GL_MIRRORED_REPEAT);
-            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, GL11.GL_MIRRORED_REPEAT);
+            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, 0x8370);
+            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, 0x8370);
             GlStateManager.bindTexture(0);
 
             framebufferList.add(currentBuffer);
@@ -119,5 +119,12 @@ public class KawaseBlur {
         StencilUtil.uninitStencilBuffer();
         RenderUtils.resetColor();
         GlStateManager.bindTexture(0);
+    }
+
+    public static void cleanup() {
+        for (Framebuffer fb : framebufferList) {
+            fb.deleteFramebuffer();
+        }
+        framebufferList.clear();
     }
 }
