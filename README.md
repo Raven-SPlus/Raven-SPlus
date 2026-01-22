@@ -56,6 +56,6 @@ Raven B4, but not only for Hypixel.
 ## Credits
 - *Powered by Cursor AI & OpenCode AI*
 - RaidenyHK/Evolution1 (github.com/RaidenyHK/Evolution1): Matrix bypass code reference (I love Matrix and Matrix bypasses)
-- Cryptix [(Discord server)](https://discord.gg/krNw54Eb4y): Alt Manager auth flow, Hypixel InvMove and AutoBlock (trillionaire begs for unbans)
+- Cryptix (Rest in Peace): Alt Manager auth flow, Hypixel InvMove and AutoBlock (trillionaire begs for unbans)
 - Eclipse (github.com/corona-cn/eclipse): Polar & Grim Disabler, Matrix Speed, Entropy, Interpolation, mouse sensitivity GCD/mouse step quantization (Check CoronaCN this guy's a sick person)
 - FDPClient (fdpinfo.github.io): Alt Manager OAuth login, mouse sensitivity GCD/mouse step quantization, rotation point selection, (reference) startup splash screen flow/guard
