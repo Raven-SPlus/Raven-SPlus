@@ -8,6 +8,7 @@ import keystrokesmod.module.impl.combat.KillAura;
 import keystrokesmod.module.impl.other.RotationHandler;
 import keystrokesmod.module.setting.impl.ButtonSetting;
 import keystrokesmod.module.setting.impl.SliderSetting;
+import keystrokesmod.mixins.impl.network.C08PacketPlayerBlockPlacementAccessor;
 import keystrokesmod.utility.*;
 import keystrokesmod.utility.Timer;
 import keystrokesmod.utility.scaffold.ScaffoldUtils;
@@ -114,6 +115,17 @@ public class Scaffold extends Module {
     private int currentFace;
     private boolean enabledOffGround = false;
     
+    // Intave 12 bypass: Timing and randomization
+    private long lastPlacementTime = 0;
+    private long lastBlockPlacePacketTime = 0; // Track when block place packet was sent
+    private int lastPlacedBlockY = Integer.MIN_VALUE; // Track Y-level of last placed block (Intave line 137)
+    private static final long MIN_PLACEMENT_DELAY = 5; // Minimum delay between placements (ms) - reduced for manual tower
+    private static final long MAX_PLACEMENT_DELAY = 20; // Maximum delay between placements (ms) - reduced for manual tower
+    private static final long MIN_PLACEMENT_DELAY_AIR = 0; // No delay when in air (ms) - allow manual tower
+    private static final long MAX_PLACEMENT_DELAY_AIR = 5; // Very short delay when in air (ms)
+    private static final long SAME_Y_LEVEL_EXTRA_DELAY_MIN = 15; // Extra delay when placing on same Y-level (ms)
+    private static final long SAME_Y_LEVEL_EXTRA_DELAY_MAX = 45; // Extra delay when placing on same Y-level (ms)
+    
     // Compatibility fields for old API
     public ButtonSetting tower;
     public SliderSetting strafe;
@@ -184,6 +196,11 @@ public class Scaffold extends Module {
         disabledModule = false;
         dontDisable = false;
         disableTicks = 0;
+        
+        // Reset timing for Intave 12 bypass
+        lastPlacementTime = 0;
+        lastBlockPlacePacketTime = 0;
+        lastPlacedBlockY = Integer.MIN_VALUE;
     }
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
@@ -587,8 +604,92 @@ public class Scaffold extends Module {
             return;
         }
         if (e.getPacket() instanceof C08PacketPlayerBlockPlacement) {
-            currentFace = ((C08PacketPlayerBlockPlacement) e.getPacket()).getPlacedBlockDirection();
+            C08PacketPlayerBlockPlacement packet = (C08PacketPlayerBlockPlacement) e.getPacket();
+            currentFace = packet.getPlacedBlockDirection();
+            
+            // Track packet time for Intave Check 2 (packet timing validation)
+            lastBlockPlacePacketTime = System.currentTimeMillis();
+            
+            // Intave 12 bypass: Randomize block face look vectors to avoid suspicious values
+            // Intave Check 4 (line 145-153): isSuspicious(f) where f == 0.0 || f == 0.5 || f >= 1.0
+            // Intave Check 4 (line 154): f < 0.0 || f > 1.0 → FLAG
+            // Special case (line 90): If all three are 0.0, Intave allows it
+            C08PacketPlayerBlockPlacementAccessor accessor = (C08PacketPlayerBlockPlacementAccessor) packet;
+            
+            float facingX = packet.getPlacedBlockOffsetX();
+            float facingY = packet.getPlacedBlockOffsetY();
+            float facingZ = packet.getPlacedBlockOffsetZ();
+            
+            // Special case: If all three are 0.0, Intave allows it - but randomize individual suspicious values
+            boolean allZero = Math.abs(facingX) < 0.001f && Math.abs(facingY) < 0.001f && Math.abs(facingZ) < 0.001f;
+            
+            if (!allZero) {
+                // Randomize values to avoid 0.0, 0.5, and >=1.0
+                facingX = randomizeFacingValue(facingX);
+                facingY = randomizeFacingValue(facingY);
+                facingZ = randomizeFacingValue(facingZ);
+            } else {
+                // All zero is allowed, but add tiny random offset to avoid pattern
+                facingX = (float) (Math.random() * 0.01);
+                facingY = (float) (Math.random() * 0.01);
+                facingZ = (float) (Math.random() * 0.01);
+            }
+            
+            accessor.setFacingX(facingX);
+            accessor.setFacingY(facingY);
+            accessor.setFacingZ(facingZ);
         }
+    }
+    
+    /**
+     * Randomizes block face look vector values to bypass Intave 12 detection.
+     * Avoids suspicious values: 0.0, 0.5, and >=1.0
+     * Intave checks: f == 0.0 || f == 0.5 || f >= 1.0
+     */
+    private float randomizeFacingValue(float value) {
+        // Special case: If all three values are 0.0, Intave allows it (line 90)
+        // But we still want to randomize individual suspicious values
+        
+        // If value is exactly 0.0, 0.5, or >=1.0, randomize it
+        if (Math.abs(value) < 0.001f) {
+            // 0.0 -> randomize to 0.01-0.49 or 0.51-0.99
+            if (Math.random() < 0.5) {
+                return (float) (Math.random() * 0.48 + 0.01); // 0.01 to 0.49
+            } else {
+                return (float) (Math.random() * 0.48 + 0.51); // 0.51 to 0.99
+            }
+        }
+        if (Math.abs(value - 0.5f) < 0.001f) {
+            // 0.5 -> randomize to avoid exact 0.5
+            // Return value in range 0.35-0.49 or 0.51-0.65 (avoiding 0.5)
+            if (Math.random() < 0.5) {
+                return (float) (Math.random() * 0.14 + 0.35); // 0.35 to 0.49
+            } else {
+                return (float) (Math.random() * 0.14 + 0.51); // 0.51 to 0.65
+            }
+        }
+        if (value >= 1.0f || value < 0.0f) {
+            // Invalid range -> clamp and randomize
+            float clamped = Math.max(0.01f, Math.min(0.99f, value));
+            if (Math.abs(clamped - 0.5f) < 0.05f) {
+                clamped = clamped < 0.5f ? 0.4f : 0.6f;
+            }
+            return clamped;
+        }
+        
+        // For legitimate values, add very small random offset to avoid pattern detection
+        // But keep it subtle to not break placements
+        float offset = (float) ((Math.random() - 0.5) * 0.015); // ±0.0075 offset (very subtle)
+        float newValue = value + offset;
+        
+        // Clamp to valid range and avoid suspicious values
+        if (newValue < 0.01f) newValue = 0.01f;
+        if (newValue > 0.99f) newValue = 0.99f;
+        // Avoid 0.5 with a small margin
+        if (Math.abs(newValue - 0.5f) < 0.03f) {
+            newValue = newValue < 0.5f ? 0.47f : 0.53f;
+        }
+        return newValue;
     }
 
     @SubscribeEvent
@@ -799,9 +900,132 @@ public class Scaffold extends Module {
         if (heldItem == null || !(heldItem.getItem() instanceof ItemBlock) || !ContainerUtils.canBePlaced((ItemBlock) heldItem.getItem())) {
             return;
         }
+        
+        // Intave 12 bypass: Add timing delay between placements to avoid pattern detection
+        // Intave Check 2 (line 122): diffToLastValidBlockPacket > 2000ms && valid → FLAG
+        // Intave line 137: Detects same Y-level placements - if (blockY - 2) matches previous within 0.1 blocks
+        // Intave line 138: Calculates balance from last 10 placement timings, flags if balance < 380.0
+        // Solution: Vary timing significantly when placing on same Y-level to increase balance
+        long currentTime = System.currentTimeMillis();
+        boolean inAir = !mc.thePlayer.onGround;
+        boolean isJumping = mc.thePlayer.motionY > 0.0; // Moving upward
+        
+        // Check if placing on same Y-level as last placement (Intave line 137 detection)
+        // Intave checks: (blockY - 2) matches previous penaltyBlock.getY() within 0.1 blocks
+        // We track the actual Y-level and compare directly
+        int currentBlockY = block.blockPos.getY();
+        boolean sameYLevel = (lastPlacedBlockY != Integer.MIN_VALUE && 
+                              Math.abs(currentBlockY - lastPlacedBlockY) < 0.1);
+        
+        // For manual tower (player jumping), be very lenient with timing
+        if (lastPlacementTime > 0) {
+            long timeSinceLastPlacement = currentTime - lastPlacementTime;
+            long requiredDelay;
+            
+            // If player is jumping upward (manual tower), use no delay
+            if (isJumping && inAir) {
+                requiredDelay = 0; // No delay when manually jumping - allow fast placements
+            } else if (inAir) {
+                // Very short delay when in air (falling)
+                requiredDelay = MIN_PLACEMENT_DELAY_AIR + (long)(Math.random() * (MAX_PLACEMENT_DELAY_AIR - MIN_PLACEMENT_DELAY_AIR));
+            } else {
+                // Normal delay when on ground
+                requiredDelay = MIN_PLACEMENT_DELAY + (long)(Math.random() * (MAX_PLACEMENT_DELAY - MIN_PLACEMENT_DELAY));
+            }
+            
+            // Intave line 137 bypass: Add extra random delay when placing on same Y-level
+            // This varies the timing to increase balance and prevent flags
+            if (sameYLevel && !isJumping) {
+                long extraDelay = SAME_Y_LEVEL_EXTRA_DELAY_MIN + 
+                                 (long)(Math.random() * (SAME_Y_LEVEL_EXTRA_DELAY_MAX - SAME_Y_LEVEL_EXTRA_DELAY_MIN));
+                requiredDelay += extraDelay;
+            }
+            
+            if (timeSinceLastPlacement < requiredDelay) {
+                // Delay placement to avoid suspicious timing patterns
+                return;
+            }
+        }
+        
+        // Intave Check 2: Ensure we place within 2000ms of packet arrival
+        // Track when packet was sent and ensure placement happens soon after
+        if (lastBlockPlacePacketTime > 0) {
+            long timeSincePacket = currentTime - lastBlockPlacePacketTime;
+            if (timeSincePacket > 1800) {
+                // Too long since packet - might trigger Check 2, but allow if jumping
+                if (!isJumping && !inAir) {
+                    return; // Skip if on ground and too long since packet
+                }
+            }
+        }
+        
         MovingObjectPosition raycast = RotationUtils.rayTraceCustom(mc.playerController.getBlockReachDistance(), RotationUtils.serverRotations[0], RotationUtils.serverRotations[1]);
-        if (raycast != null && raycast.typeOfHit == MovingObjectPosition.MovingObjectType.BLOCK && raycast.getBlockPos().equals(block.blockPos) && raycast.sideHit.equals(block.enumFacing)) {
-            block.hitVec = raycast.hitVec;
+        
+        // Intave 12 bypass: Ensure target block matches placed block (distance check)
+        // Intave Check 5d (line 210-220): f4 > 0.0 && f4 < 1.0 && hsDist < 1.0 → FLAG if lastTimeSuspiciousForScaffoldWalk < 2000ms
+        // Intave Check 6 (line 240-247): Sprinting+falling with target NOT adjacent → increases scaffoldwalkVL
+        // Intave line 240: Checks if target is NOT (NORTH/EAST/SOUTH/WEST relative to placed block)
+        boolean isSprinting = mc.thePlayer.isSprinting();
+        boolean isFalling = mc.thePlayer.motionY < 0.0;
+        
+        // Calculate hsDist (distance from block above head to player) - Intave uses this
+        double hsDist = block.blockPos.getY() + 1.0 - mc.thePlayer.posY;
+        if (hsDist < 0) hsDist = -hsDist; // Absolute distance
+        
+        // Be very lenient when jumping (manual tower) to allow placements
+        // For manual tower, prioritize placement success over perfect target matching
+        if (raycast != null && raycast.typeOfHit == MovingObjectPosition.MovingObjectType.BLOCK) {
+            double distanceToTarget = raycast.getBlockPos().distanceSq(block.blockPos);
+            double distanceToTargetLinear = Math.sqrt(distanceToTarget);
+            
+            // If target block matches placed block exactly, use raycast hitVec (most accurate)
+            if (distanceToTarget < 0.1 && raycast.getBlockPos().equals(block.blockPos) && raycast.sideHit.equals(block.enumFacing)) {
+                block.hitVec = raycast.hitVec;
+            } 
+            // If target is close, use it but be careful about Intave Check 5d and Check 6
+            else if (distanceToTargetLinear < 1.0) {
+                // Intave Check 6: When sprinting and falling, target must be adjacent (NORTH/EAST/SOUTH/WEST)
+                // Intave line 240: Checks if target.getRelative(NORTH/EAST/SOUTH/WEST) != placed block
+                // This means: placed block must be adjacent to target block
+                // This is very strict (< 380ms window), so we need to ensure target matches
+                if (isSprinting && isFalling && !isJumping) {
+                    // Check if placed block is adjacent to target block (NORTH/EAST/SOUTH/WEST)
+                    BlockPos targetPos = raycast.getBlockPos();
+                    BlockPos placedPos = block.blockPos;
+                    boolean isAdjacent = (targetPos.add(0, 0, -1).equals(placedPos) ||  // NORTH
+                                         targetPos.add(1, 0, 0).equals(placedPos) ||   // EAST
+                                         targetPos.add(0, 0, 1).equals(placedPos) ||    // SOUTH
+                                         targetPos.add(-1, 0, 0).equals(placedPos)) && // WEST
+                                        targetPos.getY() == placedPos.getY();
+                    
+                    if (!isAdjacent && distanceToTargetLinear > 0.2) {
+                        // Placed block is not adjacent to target - skip to avoid Check 6
+                        // But only if not jumping (manual tower needs leniency)
+                        return;
+                    }
+                }
+                // Intave Check 5d: If distance > 0.0 && < 1.0 && hsDist < 1.0, might flag
+                // Use raycast hitVec if it matches the block and facing to minimize distance
+                if (raycast.getBlockPos().equals(block.blockPos) && raycast.sideHit.equals(block.enumFacing)) {
+                    block.hitVec = raycast.hitVec;
+                } else if (hsDist < 1.0 && distanceToTargetLinear > 0.0 && distanceToTargetLinear < 1.0 && !isJumping) {
+                    // Intave Check 5d condition - only be careful if not jumping
+                    // When jumping, allow placement even if target doesn't match perfectly
+                    if (raycast.getBlockPos().equals(block.blockPos)) {
+                        block.hitVec = raycast.hitVec;
+                    }
+                }
+            } 
+            // Target is far - only skip if on ground (allow in air for manual tower)
+            else if (!isJumping && !inAir && distanceToTargetLinear > 1.5) {
+                // Skip if on ground and target is too far (> 1.5 blocks)
+                return;
+            }
+            // When jumping or in air, allow placement even if target doesn't match perfectly
+            // This is critical for manual tower to work
+        } else if (isJumping || inAir) {
+            // When jumping/in air and no raycast, still allow placement
+            // Manual tower needs to work even if raycast doesn't hit perfectly
         }
         
         // Set compatibility fields
@@ -810,6 +1034,7 @@ public class Scaffold extends Module {
             placeBlock = raycast;
         } else {
             // Create a basic MovingObjectPosition for compatibility (constructor: Vec3 hitVec, EnumFacing sideHit, BlockPos blockPos)
+            // Use block.hitVec directly - randomization happens in onSendPacket via block face offsets
             Vec3 hitVecForMOP = block.hitVec != null ? block.hitVec : new Vec3(block.blockPos.getX() + 0.5, block.blockPos.getY() + 0.5, block.blockPos.getZ() + 0.5);
             placeBlock = new MovingObjectPosition(hitVecForMOP, block.enumFacing, block.blockPos);
         }
@@ -818,7 +1043,14 @@ public class Scaffold extends Module {
         placeYaw = RotationUtils.serverRotations[0];
         placePitch = RotationUtils.serverRotations[1];
         
+        // Intave 12 bypass: Ensure placement happens soon after packet to avoid Check 2
+        // The packet is sent by onPlayerRightClick, so we track it here
         if (mc.playerController.onPlayerRightClick(mc.thePlayer, mc.theWorld, heldItem, block.blockPos, block.enumFacing, block.hitVec)) {
+            // Update last placement time and packet time
+            lastPlacementTime = currentTime;
+            lastBlockPlacePacketTime = currentTime; // Packet sent now
+            lastPlacedBlockY = block.blockPos.getY(); // Track Y-level for Intave line 137 detection
+            
             if (silentSwing.isToggled()) {
                 mc.thePlayer.sendQueue.addToSendQueue(new C0APacketAnimation());
             }
@@ -920,6 +1152,8 @@ public class Scaffold extends Module {
         EnumFacing blockFacing = lastPlacedFacing = blockInfo2.enumFacing;
         blockInfo = blockInfo2;
 
+        // Calculate hitVec - the randomization will be applied in onSendPacket via block face offsets
+        // Keep hitVec calculation similar to reference for placement accuracy
         double hitX = (blockX + 0.5D) + getCoord(blockFacing.getOpposite(), "x") * 0.5D;
         double hitY = (blockY + 0.5D) + getCoord(blockFacing.getOpposite(), "y") * 0.5D;
         double hitZ = (blockZ + 0.5D) + getCoord(blockFacing.getOpposite(), "z") * 0.5D;
@@ -1102,8 +1336,23 @@ public class Scaffold extends Module {
             return;
         }
         double input = (motion.getInput() / 100);
-        mc.thePlayer.motionX *= input;
-        mc.thePlayer.motionZ *= input;
+        
+        // Intave 12 bypass: Add variation to motion to avoid consistent XZ motion ratio detection
+        // Intave Check 7 (line 299-305): Detects xzConjToLastxz < 0.4 OR (xzConjToLastxz ≈ 1.0 && !sneaking)
+        // When placing blocks under player within 500ms, XZ motion must vary
+        // Variation should be significant enough to avoid < 0.4 ratio but not too much to break movement
+        double variationX = 1.0 + (Math.random() - 0.5) * 0.04; // ±2% variation (increased)
+        double variationZ = 1.0 + (Math.random() - 0.5) * 0.04;
+        
+        // Ensure variation doesn't create exact 1.0 ratio (suspicious when not sneaking)
+        if (Math.abs(variationX - variationZ) < 0.01 && !mc.thePlayer.isSneaking()) {
+            // If ratios are too similar, add more variation
+            variationX += (Math.random() - 0.5) * 0.02;
+            variationZ += (Math.random() - 0.5) * 0.02;
+        }
+        
+        mc.thePlayer.motionX *= input * variationX;
+        mc.thePlayer.motionZ *= input * variationZ;
     }
 
     public float hardcodedYaw() {
