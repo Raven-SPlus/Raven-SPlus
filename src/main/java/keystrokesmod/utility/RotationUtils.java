@@ -21,6 +21,9 @@ public class RotationUtils {
     public static float prevRenderPitch;
     public static float renderYaw;
     public static float prevRenderYaw;
+    
+    // Scaffold-specific: server-side rotation tracking (copied from reference)
+    public static float[] serverRotations = new float[] { 0, 0 };
 
     public static void setRenderYaw(float yaw) {
         mc.thePlayer.rotationYawHead = yaw;
@@ -39,6 +42,37 @@ public class RotationUtils {
         final double n2 = blockPos.getY() + 0.45 - (mc.thePlayer.posY + mc.thePlayer.getEyeHeight());
         final double n3 = blockPos.getZ() + 0.45 - mc.thePlayer.posZ;
         return new float[] { mc.thePlayer.rotationYaw + MathHelper.wrapAngleTo180_float((float)(Math.atan2(n3, n) * 57.295780181884766) - 90.0f - mc.thePlayer.rotationYaw), clampTo90(mc.thePlayer.rotationPitch + MathHelper.wrapAngleTo180_float((float)(-(Math.atan2(n2, MathHelper.sqrt_double(n * n + n3 * n3)) * 57.295780181884766)) - mc.thePlayer.rotationPitch)) };
+    }
+    
+    /**
+     * Get rotations to a Vec3 position (copied from reference for Scaffold compatibility)
+     */
+    public static float[] getRotations(Vec3 vec3) {
+        double x = vec3.xCoord + 1.0D - mc.thePlayer.posX;
+        double y = vec3.yCoord + 1.0D - (mc.thePlayer.posY + mc.thePlayer.getEyeHeight());
+        double z = vec3.zCoord + 1.0D - mc.thePlayer.posZ;
+
+        float angleToBlock = (float) (Math.atan2(z, x) * (180 / Math.PI)) - 90.0f;
+        float deltaYaw = MathHelper.wrapAngleTo180_float(angleToBlock - mc.thePlayer.rotationYaw);
+        float yaw = mc.thePlayer.rotationYaw + deltaYaw;
+
+        double distance = MathHelper.sqrt_double(x * x + z * z);
+        float angleToBlockPitch = (float) (-(Math.atan2(y, distance) * (180 / Math.PI)));
+        float deltaPitch = MathHelper.wrapAngleTo180_float(angleToBlockPitch - mc.thePlayer.rotationPitch);
+        float pitch = mc.thePlayer.rotationPitch + deltaPitch;
+
+        pitch = clampTo90(pitch);
+
+        return new float[] { yaw, pitch };
+    }
+    
+    /**
+     * Set fake rotations (copied from reference for Scaffold compatibility)
+     * Note: This is a stub - actual fake rotation handling is done by RotationHandler
+     */
+    public static void setFakeRotations(float yaw, float pitch) {
+        // Fake rotations are handled by RotationHandler in the current codebase
+        // This method exists for compatibility with reference Scaffold code
     }
 
     public static float interpolateValue(float tickDelta, float old, float newFloat) {
@@ -433,7 +467,17 @@ public class RotationUtils {
         return false;
     }
 
-    private static final Set<EnumFacing> FACINGS = new HashSet<>(Arrays.asList(EnumFacing.VALUES));
+    public static final Set<EnumFacing> FACINGS = new HashSet<>(Arrays.asList(EnumFacing.VALUES));
+
+    // Generate safe hitVec coordinate avoiding Intave-12 flagged values (0.0, 0.5, >= 1.0)
+    // Returns a value in range (0.01, 0.49) U (0.51, 0.99)
+    private static double generateSafeOffset() {
+        double value;
+        do {
+            value = Utils.randomizeDouble(0.01, 0.99);
+        } while (Math.abs(value - 0.5) < 0.01); // Avoid 0.5 ± 0.01
+        return value;
+    }
 
     @Contract(pure = true)
     public static @NotNull Optional<Triple<BlockPos, EnumFacing, keystrokesmod.script.classes.Vec3>> getPlaceSide(@NotNull BlockPos blockPos) {
@@ -442,6 +486,11 @@ public class RotationUtils {
 
     @Contract(pure = true)
     public static @NotNull Optional<Triple<BlockPos, EnumFacing, keystrokesmod.script.classes.Vec3>> getPlaceSide(@NotNull BlockPos blockPos, Set<EnumFacing> limitFacing) {
+        return getPlaceSide(blockPos, limitFacing, false);
+    }
+
+    @Contract(pure = true)
+    public static @NotNull Optional<Triple<BlockPos, EnumFacing, keystrokesmod.script.classes.Vec3>> getPlaceSide(@NotNull BlockPos blockPos, Set<EnumFacing> limitFacing, boolean intaveSafe) {
         final List<BlockPos> possible = Arrays.asList(
                 blockPos.down(), blockPos.east(), blockPos.west(),
                 blockPos.north(), blockPos.south(), blockPos.up()
@@ -453,22 +502,58 @@ public class RotationUtils {
                 keystrokesmod.script.classes.Vec3 hitPos;
                 if (pos.getY() < blockPos.getY()) {
                     facing = EnumFacing.UP;
-                    hitPos = new keystrokesmod.script.classes.Vec3(pos.getX() + 0.5, pos.getY() + 1, pos.getZ() + 0.5);
+                    if (intaveSafe) {
+                        double x = generateSafeOffset();
+                        double z = generateSafeOffset();
+                        hitPos = new keystrokesmod.script.classes.Vec3(pos.getX() + x, pos.getY() + 1, pos.getZ() + z);
+                    } else {
+                        hitPos = new keystrokesmod.script.classes.Vec3(pos.getX() + 0.5, pos.getY() + 1, pos.getZ() + 0.5);
+                    }
                 } else if (pos.getX() > blockPos.getX()) {
                     facing = EnumFacing.WEST;
-                    hitPos = new keystrokesmod.script.classes.Vec3(pos.getX(), pos.getY() + 0.5, pos.getZ() + 0.5);
+                    if (intaveSafe) {
+                        double y = generateSafeOffset();
+                        double z = generateSafeOffset();
+                        hitPos = new keystrokesmod.script.classes.Vec3(pos.getX(), pos.getY() + y, pos.getZ() + z);
+                    } else {
+                        hitPos = new keystrokesmod.script.classes.Vec3(pos.getX(), pos.getY() + 0.5, pos.getZ() + 0.5);
+                    }
                 } else if (pos.getX() < blockPos.getX()) {
                     facing = EnumFacing.EAST;
-                    hitPos = new keystrokesmod.script.classes.Vec3(pos.getX() + 1, pos.getY() + 0.5, pos.getZ() + 0.5);
+                    if (intaveSafe) {
+                        double y = generateSafeOffset();
+                        double z = generateSafeOffset();
+                        hitPos = new keystrokesmod.script.classes.Vec3(pos.getX() + 1, pos.getY() + y, pos.getZ() + z);
+                    } else {
+                        hitPos = new keystrokesmod.script.classes.Vec3(pos.getX() + 1, pos.getY() + 0.5, pos.getZ() + 0.5);
+                    }
                 } else if (pos.getZ() < blockPos.getZ()) {
                     facing = EnumFacing.SOUTH;
-                    hitPos = new keystrokesmod.script.classes.Vec3(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 1);
+                    if (intaveSafe) {
+                        double x = generateSafeOffset();
+                        double y = generateSafeOffset();
+                        hitPos = new keystrokesmod.script.classes.Vec3(pos.getX() + x, pos.getY() + y, pos.getZ() + 1);
+                    } else {
+                        hitPos = new keystrokesmod.script.classes.Vec3(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 1);
+                    }
                 } else if (pos.getZ() > blockPos.getZ()) {
                     facing = EnumFacing.NORTH;
-                    hitPos = new keystrokesmod.script.classes.Vec3(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ());
+                    if (intaveSafe) {
+                        double x = generateSafeOffset();
+                        double y = generateSafeOffset();
+                        hitPos = new keystrokesmod.script.classes.Vec3(pos.getX() + x, pos.getY() + y, pos.getZ());
+                    } else {
+                        hitPos = new keystrokesmod.script.classes.Vec3(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ());
+                    }
                 } else {
                     facing = EnumFacing.DOWN;
-                    hitPos = new keystrokesmod.script.classes.Vec3(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5);
+                    if (intaveSafe) {
+                        double x = generateSafeOffset();
+                        double z = generateSafeOffset();
+                        hitPos = new keystrokesmod.script.classes.Vec3(pos.getX() + x, pos.getY(), pos.getZ() + z);
+                    } else {
+                        hitPos = new keystrokesmod.script.classes.Vec3(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5);
+                    }
                 }
 
                 if (!limitFacing.contains(facing)) continue;

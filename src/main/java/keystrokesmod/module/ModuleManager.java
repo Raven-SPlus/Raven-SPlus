@@ -10,7 +10,6 @@ import keystrokesmod.module.impl.other.*;
 import keystrokesmod.module.impl.player.*;
 import keystrokesmod.module.impl.render.*;
 import keystrokesmod.module.impl.world.*;
-import keystrokesmod.module.impl.experimental.ScaffoldRecode;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
@@ -129,7 +128,6 @@ public class ModuleManager {
     public static ViaVersionFix viaVersionFix;
     public static AutoGapple autoGapple;
     public static RemoteShop remoteShop;
-    public static ScaffoldRecode scaffoldRecode;
 
     public void register() {
 
@@ -302,9 +300,6 @@ public class ModuleManager {
         this.addModule(scaffold = new Scaffold());
         this.addModule(tower = new Tower());
         this.addModule(bedDefender = new BedDefender());
-
-        // experimental
-        this.addModule(scaffoldRecode = new ScaffoldRecode());
 
         // exploit
         this.addModule(clientSpoofer = new ClientSpoofer());

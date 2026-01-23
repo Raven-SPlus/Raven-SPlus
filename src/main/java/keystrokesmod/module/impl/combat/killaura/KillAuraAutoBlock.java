@@ -5,15 +5,12 @@ import keystrokesmod.event.ReceivePacketEvent;
 import keystrokesmod.module.ModuleManager;
 import keystrokesmod.module.impl.combat.KillAura;
 import keystrokesmod.module.impl.other.SlotHandler;
-import keystrokesmod.module.impl.player.Blink;
-import keystrokesmod.utility.BlockUtils;
 import keystrokesmod.utility.PacketUtils;
 import keystrokesmod.utility.Reflection;
 import keystrokesmod.utility.Utils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.settings.KeyBinding;
 import net.minecraft.entity.EntityLivingBase;
-import net.minecraft.init.Blocks;
 import net.minecraft.network.Packet;
 import net.minecraft.network.play.client.*;
 import net.minecraft.network.play.server.S2FPacketSetSlot;
@@ -33,7 +30,7 @@ public class KillAuraAutoBlock {
     public boolean blinking;
     public boolean lag;
     public boolean swapped;
-    public int hypixelAutoblockState;
+    public int asw; // Hypixel autoblock state (0 or 1)
     public int blockingTime = 0;
     
     public final ConcurrentLinkedQueue<Packet<?>> blinkedPackets = new ConcurrentLinkedQueue<>();
@@ -50,7 +47,7 @@ public class KillAuraAutoBlock {
         resetBlinkState(true);
         block.set(false);
         blockingTime = 0;
-        hypixelAutoblockState = 0;
+        asw = 0;
         
         // Stop using Blink silently for Hypixel autoblock
         if (parent.autoBlockMode.getInput() == 9 && ModuleManager.blink != null) {
@@ -104,7 +101,7 @@ public class KillAuraAutoBlock {
                 Reflection.setButton(1, down);
                 blocking = down;
                 break;
-            case 9: // Hypixel
+            case 9: // Hypixel - handled in updateHypixelAutoblock()
                 setBlockState(false, false, false);
                 break;
         }
@@ -112,6 +109,82 @@ public class KillAuraAutoBlock {
             blockingTime++;
         } else {
             blockingTime = 0;
+        }
+    }
+    
+    public void updateHypixelAutoblock(EntityLivingBase target) {
+        if (parent.autoBlockMode.getInput() != 9 || !block.get() || !Utils.nullCheck()) {
+            return;
+        }
+        
+        // Check if we have a valid target (similar to cryptix's lastTarget check)
+        // Note: In cryptix, it checks lastTarget != null before running Hypixel autoblock
+        // We'll use target != null check instead
+        if (target == null) {
+            // Reset logic when no target
+            if (asw == 0 && blocking) {
+                if (ModuleManager.blink != null) {
+                    ModuleManager.blink.useSilently(parent);
+                }
+                int slot = (int) (Math.random() * 9);
+                while (slot == mc.thePlayer.inventory.currentItem) {
+                    slot = (int) (Math.random() * 9);
+                }
+                mc.thePlayer.sendQueue.addToSendQueue(new C09PacketHeldItemChange(slot));
+                mc.thePlayer.sendQueue.addToSendQueue(new C09PacketHeldItemChange(mc.thePlayer.inventory.currentItem));
+                unBlock();
+                ++asw;
+            } else if (asw != 0) {
+                if (ModuleManager.blink != null) {
+                    ModuleManager.blink.stopUsingSilently(parent);
+                }
+                asw = 0;
+            }
+            return;
+        }
+        
+        // Main Hypixel autoblock logic (runs every tick when blocking)
+        switch (asw) {
+            case 0:
+                // First tick: swap to random slot (different from current), swap back, unblock (if blocking)
+                int slot = (int) (Math.random() * 9);
+                while (slot == mc.thePlayer.inventory.currentItem) {
+                    slot = (int) (Math.random() * 9);
+                }
+                mc.thePlayer.sendQueue.addToSendQueue(new C09PacketHeldItemChange(slot));
+                mc.thePlayer.sendQueue.addToSendQueue(new C09PacketHeldItemChange(mc.thePlayer.inventory.currentItem));
+                if (blocking) {
+                    unBlock();
+                }
+                ++asw;
+                break;
+            case 1:
+                // Second tick: attack (if in range), block, stop blink, start blink, reset asw
+                if (target != null) {
+                    double attackRange = parent.attackRange.getInput();
+                    double swingRange = parent.swingRange.getInput();
+                    double distance = mc.thePlayer.getDistanceToEntity(target);
+                    
+                    if (distance <= attackRange) {
+                        // Attack if in attack range - handled by KillAura's click() method
+                        // The attack will proceed because asw == 1
+                    } else if (distance <= swingRange) {
+                        // Swing if only in swing range
+                        mc.thePlayer.swingItem();
+                    }
+                }
+                sendBlock();
+                blocking = Reflection.setBlocking(true);
+                
+                // Stop blink then start blink
+                if (ModuleManager.blink != null) {
+                    ModuleManager.blink.stopUsingSilently(parent);
+                    ModuleManager.blink.useSilently(parent);
+                }
+                
+                asw = 0;
+                releasePackets();
+                break;
         }
     }
 
@@ -141,43 +214,12 @@ public class KillAuraAutoBlock {
     public void resetBlinkState(boolean unblock) {
         if (!Utils.nullCheck()) return;
         
-        // Handle Hypixel autoblock - 2-tick sequence
-        if (parent.autoBlockMode.getInput() == 9 && block.get()) {
-            switch (hypixelAutoblockState) {
-                case 0:
-                    // First tick: start blinking, swap to a random slot, swap back, unblock (if blocking)
-                    if (ModuleManager.blink != null && !blinking) {
-                        boolean blinkWasEnabled = ModuleManager.blink.isEnabled();
-                        if (!blinkWasEnabled) {
-                            ModuleManager.blink.useSilently(parent);
-                        }
-                        blinking = true;
-                    }
-                    
-                    int randomSlot = (int) (Math.random() * 9);
-                    mc.thePlayer.sendQueue.addToSendQueue(new C09PacketHeldItemChange(randomSlot));
-                    mc.thePlayer.sendQueue.addToSendQueue(new C09PacketHeldItemChange(mc.thePlayer.inventory.currentItem));
-                    
-                    if (blocking) {
-                        unBlock();
-                    }
-                    
-                    hypixelAutoblockState = 1;
-                    return;
-                case 1:
-                    // Second tick: attack, block, stop blinking (all blink should be silent call)
-                    sendBlock();
-                    blocking = Reflection.setBlocking(true);
-                    
-                    if (blinking && ModuleManager.blink != null) {
-                        ModuleManager.blink.stopUsingSilently(parent);
-                        blinking = false;
-                    }
-                    
-                    hypixelAutoblockState = 0;
-                    releasePackets();
-                    return;
+        // Reset Hypixel autoblock state if needed
+        if (parent.autoBlockMode.getInput() == 9 && asw != 0) {
+            if (ModuleManager.blink != null) {
+                ModuleManager.blink.stopUsingSilently(parent);
             }
+            asw = 0;
         }
         
         releasePackets();

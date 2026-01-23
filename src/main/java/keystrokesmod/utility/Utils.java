@@ -1195,4 +1195,18 @@ public class Utils {
         
         return result.toString();
     }
+    
+    /**
+     * Check if player is tabbed in (copied from reference for Scaffold compatibility)
+     */
+    public static boolean tabbedIn() {
+        return mc.currentScreen == null && mc.inGameHasFocus;
+    }
+    
+    /**
+     * Merge alpha with color (copied from reference for Scaffold compatibility)
+     */
+    public static int mergeAlpha(int color, int alpha) {
+        return (color & 0xFFFFFF) | (alpha << 24);
+    }
 }

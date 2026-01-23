@@ -540,6 +540,11 @@ public class KillAura extends IAutoClicker {
         double dist = target != null ? mc.thePlayer.getDistanceToEntity(target) : 100;
         autoBlock.updateBlockState(target, dist);
         autoBlock.block(target);
+        
+        // Update Hypixel autoblock every tick (cryptix implementation)
+        if (autoBlockMode.getInput() == 9) {
+            autoBlock.updateHypixelAutoblock(target);
+        }
 
         // Check disable conditions
         if (ModuleManager.bedAura != null && ModuleManager.bedAura.isEnabled() && ModuleManager.bedAura.currentBlock != null) {
@@ -600,7 +605,7 @@ public class KillAura extends IAutoClicker {
         // Handle attack and interact
         if (attack) {
             // Hypixel mode: cancel attack if blocking state doesn't allow
-            if (autoBlockMode.getInput() == 9 && autoBlock.hypixelAutoblockState != 1) {
+            if (autoBlockMode.getInput() == 9 && autoBlock.asw != 1) {
                 autoBlock.resetBlinkState(true);
                 attack = false;
                 return;
@@ -821,7 +826,7 @@ public class KillAura extends IAutoClicker {
             if (target != null && mc.thePlayer.getDistanceToEntity(target) <= swingRange.getInput()) {
                 if (mc.currentScreen == null && HitSelect.canAttack()) {
                     // Hypixel mode: cancel attack if blocking state doesn't allow
-                    if (autoBlockMode.getInput() == 9 && autoBlock.hypixelAutoblockState != 1) {
+                    if (autoBlockMode.getInput() == 9 && autoBlock.asw != 1) {
                         return false;
                     }
                     Utils.sendClick(0, true);
