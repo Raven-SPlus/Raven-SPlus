@@ -7,11 +7,13 @@ import keystrokesmod.module.ModuleManager;
 import keystrokesmod.module.impl.combat.KillAura;
 import keystrokesmod.module.impl.other.RotationHandler;
 import keystrokesmod.module.setting.impl.ButtonSetting;
+import keystrokesmod.module.setting.impl.ModeSetting;
 import keystrokesmod.module.setting.impl.SliderSetting;
 import keystrokesmod.mixins.impl.network.C08PacketPlayerBlockPlacementAccessor;
 import keystrokesmod.utility.*;
 import keystrokesmod.utility.Timer;
 import keystrokesmod.utility.scaffold.ScaffoldUtils;
+import keystrokesmod.utility.MoveUtil;
 import net.minecraft.block.BlockTNT;
 import net.minecraft.client.settings.KeyBinding;
 import net.minecraft.item.ItemBlock;
@@ -36,11 +38,13 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Separated utilities in ScaffoldUtils package to avoid conflicts.
  */
 public class Scaffold extends Module {
+    // Core settings
     private final SliderSetting motion;
-    public SliderSetting rotation, fakeRotation;
-    private SliderSetting sprint;
-    private SliderSetting fastScaffold;
-    private SliderSetting multiPlace;
+    public ModeSetting rotation;
+    public ModeSetting fakeRotation;
+    private ModeSetting sprint;
+    private ModeSetting fastScaffold;
+    private ModeSetting multiPlace;
     public ButtonSetting autoSwap;
     private ButtonSetting cancelKnockBack;
     private ButtonSetting fastOnRMB;
@@ -49,22 +53,46 @@ public class Scaffold extends Module {
     public ButtonSetting safeWalk;
     public ButtonSetting showBlockCount;
     private ButtonSetting silentSwing;
+    
+    // Intave 12 bypass settings
+    private ButtonSetting intaveBypass;
+    private ModeSetting intaveTimingMode;
+    private ButtonSetting intaveRandomizeFacing;
+    private ButtonSetting intaveTargetValidation;
+    private ButtonSetting intaveSprintControl;
+    private ButtonSetting intaveClickVariation;
+    private ButtonSetting intaveTimingVariance;
+    private ButtonSetting intaveMovementFix;
 
-    private String[] rotationModes = new String[] { "§cDisabled", "Simple", "Offset", "Precise" };
-    private String[] fakeRotationModes = new String[] { "§cDisabled", "Strict", "Smooth", "Spin" };
-    private String[] sprintModes = new String[] { "§cDisabled", "Vanilla", "Float" };
-    private String[] fastScaffoldModes = new String[] { "§cDisabled", "Jump B", "Jump C", "Jump D", "Keep-Y A", "Keep-Y B", "Jump A" };
-    private String[] multiPlaceModes = new String[] { "§cDisabled", "1 extra", "2 extra" };
+    // Mode options
+    private static final String[] ROTATION_MODES = {"Disabled", "Simple", "Offset", "Precise"};
+    private static final String[] FAKE_ROTATION_MODES = {"Disabled", "Strict", "Smooth", "Spin"};
+    private static final String[] SPRINT_MODES = {"Disabled", "Vanilla", "Float"};
+    private static final String[] FAST_SCAFFOLD_MODES = {"Disabled", "Jump B", "Jump C", "Jump D", "Keep-Y A", "Keep-Y B", "Jump A"};
+    private static final String[] MULTI_PLACE_MODES = {"Disabled", "1 extra", "2 extra"};
+    private static final String[] INTAVE_TIMING_MODES = {"None", "Safe", "Aggressive"};
 
+    // Visual/UI state
     public Map<BlockPos, Timer> highlight = new HashMap<>();
-
     private ScaffoldBlockCountHelper scaffoldBlockCount;
-
     public AtomicInteger lastSlot = new AtomicInteger(-1);
 
+    // Placement state
     public boolean hasSwapped;
     private boolean hasPlaced;
+    private int blockSlot = -1;
+    private Vec3 targetBlock;
+    private PlaceData blockInfo;
+    private PlaceData lastPlacement;
+    private PlaceData pendingPlacement;
+    private int pendingPlacementTick = -1;
+    private EnumFacing lastPlacedFacing;
+    private Vec3 hitVec, lookVec;
+    private float[] blockRotations;
+    public float scaffoldYaw, scaffoldPitch, blockYaw, yawOffset;
+    private float lastPlacementYaw = 0;
 
+    // Movement state
     private boolean rotateForward;
     private double startYPos = -1;
     public boolean fastScaffoldKeepY;
@@ -73,58 +101,42 @@ public class Scaffold extends Module {
     private int keepYTicks;
     public boolean lowhop;
     private int rotationDelay;
-    private int blockSlot = -1;
 
-    private float fakeYaw1, fakeYaw2;
-
-    public boolean canBlockFade;
-
+    // Float mode state
     private boolean floatJumped;
     private boolean floatStarted;
     private boolean floatWasEnabled;
     private boolean floatKeepY;
 
-    private Vec3 targetBlock;
-    private PlaceData blockInfo;
-    private Vec3 hitVec, lookVec;
-    private PlaceData lastPlacement;
-    private EnumFacing lastPlacedFacing;
-    private float[] blockRotations;
-    public float scaffoldYaw, scaffoldPitch, blockYaw, yawOffset;
+    // Rotation state
+    private float fakeYaw1, fakeYaw2;
+    private float minOffset;
+    private float minPitch = 80F;
+    private float edge;
+    private long firstStroke;
+    private float lastEdge2, yawAngle, theYaw;
+    private float fakeYaw, fakePitch;
     private boolean set2;
+    private boolean was451, was452;
 
+    // Module state
     public boolean moduleEnabled;
     public boolean isEnabled;
     private boolean disabledModule;
     private boolean dontDisable, towerEdge;
     private int disableTicks;
     private int scaffoldTicks;
-
-    private boolean was451, was452;
-
-    private float minOffset;
-    private float minPitch = 80F;
-
-    private float edge;
-
-    private long firstStroke;
-    private float lastEdge2, yawAngle, theYaw;
-    private float fakeYaw, fakePitch;
-    private float lastPlacementYaw = 0;
-
     private int currentFace;
     private boolean enabledOffGround = false;
+    public boolean canBlockFade;
     
-    // Intave 12 bypass: Timing and randomization
+    // Intave 12 bypass state
     private long lastPlacementTime = 0;
-    private long lastBlockPlacePacketTime = 0; // Track when block place packet was sent
-    private int lastPlacedBlockY = Integer.MIN_VALUE; // Track Y-level of last placed block (Intave line 137)
-    private static final long MIN_PLACEMENT_DELAY = 5; // Minimum delay between placements (ms) - reduced for manual tower
-    private static final long MAX_PLACEMENT_DELAY = 20; // Maximum delay between placements (ms) - reduced for manual tower
-    private static final long MIN_PLACEMENT_DELAY_AIR = 0; // No delay when in air (ms) - allow manual tower
-    private static final long MAX_PLACEMENT_DELAY_AIR = 5; // Very short delay when in air (ms)
-    private static final long SAME_Y_LEVEL_EXTRA_DELAY_MIN = 15; // Extra delay when placing on same Y-level (ms)
-    private static final long SAME_Y_LEVEL_EXTRA_DELAY_MAX = 45; // Extra delay when placing on same Y-level (ms)
+    private long[] placementTimings = new long[8]; // Store last 8 placement intervals for variance
+    private int timingIndex = 0;
+    private int placementCount = 0;
+    private int extraClickCounter = 0; // Track when to send extra clicks
+    private java.util.Random intaveRandom = new java.util.Random();
     
     // Compatibility fields for old API
     public ButtonSetting tower;
@@ -136,16 +148,16 @@ public class Scaffold extends Module {
     public int onGroundTicks = 0;
     public float placeYaw = 0;
     public float placePitch = 85;
-    private boolean forceStrict = false;
 
     public Scaffold() {
         super("Scaffold", category.world);
+        // Core settings
         this.registerSetting(motion = new SliderSetting("Motion", 100, 50, 150, 1, "%"));
-        this.registerSetting(rotation = new SliderSetting("Rotation", rotationModes, 1));
-        this.registerSetting(fakeRotation = new SliderSetting("Rotation (fake)", fakeRotationModes, 0));
-        this.registerSetting(sprint = new SliderSetting("Sprint mode", sprintModes, 0));
-        this.registerSetting(fastScaffold = new SliderSetting("Fast scaffold", fastScaffoldModes, 0));
-        this.registerSetting(multiPlace = new SliderSetting("Multi-place", multiPlaceModes, 0));
+        this.registerSetting(rotation = new ModeSetting("Rotation", ROTATION_MODES, 1));
+        this.registerSetting(fakeRotation = new ModeSetting("Rotation (fake)", FAKE_ROTATION_MODES, 0));
+        this.registerSetting(sprint = new ModeSetting("Sprint mode", SPRINT_MODES, 0));
+        this.registerSetting(fastScaffold = new ModeSetting("Fast scaffold", FAST_SCAFFOLD_MODES, 0));
+        this.registerSetting(multiPlace = new ModeSetting("Multi-place", MULTI_PLACE_MODES, 0));
         this.registerSetting(autoSwap = new ButtonSetting("Auto swap", true));
         this.registerSetting(cancelKnockBack = new ButtonSetting("Cancel knockback", false));
         this.registerSetting(fastOnRMB = new ButtonSetting("Fast on RMB", true));
@@ -154,6 +166,16 @@ public class Scaffold extends Module {
         this.registerSetting(safeWalk = new ButtonSetting("Safewalk", true));
         this.registerSetting(showBlockCount = new ButtonSetting("Show block count", true));
         this.registerSetting(silentSwing = new ButtonSetting("Silent swing", false));
+        
+        // Intave 12 bypass settings
+        this.registerSetting(intaveBypass = new ButtonSetting("Intave 12 Bypass", true));
+        this.registerSetting(intaveTimingMode = new ModeSetting("Intave Timing", INTAVE_TIMING_MODES, 1));
+        this.registerSetting(intaveRandomizeFacing = new ButtonSetting("Randomize Facing", true));
+        this.registerSetting(intaveTargetValidation = new ButtonSetting("Target Validation", true));
+        this.registerSetting(intaveSprintControl = new ButtonSetting("Sprint Control", true));
+        this.registerSetting(intaveClickVariation = new ButtonSetting("Click Variation", true));
+        this.registerSetting(intaveTimingVariance = new ButtonSetting("Timing Variance", true));
+        this.registerSetting(intaveMovementFix = new ButtonSetting("Movement Fix", true));
         
         // Compatibility settings
         this.registerSetting(tower = new ButtonSetting("Tower", false));
@@ -169,6 +191,8 @@ public class Scaffold extends Module {
         placeBlock = null;
         rayCasted = null;
         place = false;
+        pendingPlacement = null;
+        pendingPlacementTick = -1;
         if (scaffoldBlockCount != null) {
             scaffoldBlockCount.beginFade();
         }
@@ -197,10 +221,14 @@ public class Scaffold extends Module {
         dontDisable = false;
         disableTicks = 0;
         
-        // Reset timing for Intave 12 bypass
+        // Reset Intave 12 bypass state
         lastPlacementTime = 0;
-        lastBlockPlacePacketTime = 0;
-        lastPlacedBlockY = Integer.MIN_VALUE;
+        placementTimings = new long[8];
+        timingIndex = 0;
+        placementCount = 0;
+        extraClickCounter = 0;
+        pendingPlacement = null;
+        pendingPlacementTick = -1;
     }
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
@@ -554,7 +582,18 @@ public class Scaffold extends Module {
             rotatingForward = false;
         }
 
+        if (intaveBypass.isToggled() && intaveTargetValidation.isToggled() && pendingPlacement != null && blockRotations != null) {
+            scaffoldYaw = blockRotations[0];
+            scaffoldPitch = blockRotations[1];
+            e.setYaw(scaffoldYaw);
+            e.setPitch(scaffoldPitch);
+            theYaw = scaffoldYaw;
+        }
+
         // Tower integration removed - Tower doesn't have isVerticalTowering, yaw, pitch fields
+
+        // Movement fix is now handled via RotationEvent -> MoveFix.Silent
+        // This properly adjusts movement inputs through the rotation handler system
 
         //pitch fix
         if (e.getPitch() > 89.9F) {
@@ -593,6 +632,42 @@ public class Scaffold extends Module {
             }
             RotationUtils.setFakeRotations(fakeYaw, fakePitch);
         }
+
+        // Update server rotations after all adjustments
+        RotationUtils.serverRotations[0] = e.getYaw();
+        RotationUtils.serverRotations[1] = e.getPitch();
+    }
+    
+    @SubscribeEvent
+    public void onRotation(RotationEvent e) {
+        if (!Utils.nullCheck() || !isEnabled) {
+            return;
+        }
+        
+        // Intave 12 bypass: Apply MoveFix to ensure movement matches server rotation
+        // MoveFix.Silent makes the engine automatically adjust movement inputs
+        // based on the difference between client view and server rotation
+        // This is the proper way to handle movement/rotation sync (from reference impl)
+        if (intaveBypass.isToggled() && intaveMovementFix.isToggled() && rotation.getInput() > 0) {
+            e.setMoveFix(RotationHandler.MoveFix.Silent);
+        }
+    }
+
+    @SubscribeEvent
+    public void onPostMotion(PostMotionEvent e) {
+        if (!Utils.nullCheck() || !isEnabled) {
+            return;
+        }
+        if (pendingPlacement == null) {
+            return;
+        }
+        if (pendingPlacementTick != mc.thePlayer.ticksExisted) {
+            clearPendingPlacement();
+            return;
+        }
+        PlaceData toPlace = pendingPlacement;
+        clearPendingPlacement();
+        place(toPlace);
     }
 
     @SubscribeEvent
@@ -607,10 +682,12 @@ public class Scaffold extends Module {
             C08PacketPlayerBlockPlacement packet = (C08PacketPlayerBlockPlacement) e.getPacket();
             currentFace = packet.getPlacedBlockDirection();
             
-            // Track packet time for Intave Check 2 (packet timing validation)
-            lastBlockPlacePacketTime = System.currentTimeMillis();
-            
             // Intave 12 bypass: Randomize block face look vectors to avoid suspicious values
+            // Only apply if bypass is enabled and randomize facing is toggled
+            if (!intaveBypass.isToggled() || !intaveRandomizeFacing.isToggled()) {
+                return;
+            }
+            
             // Intave Check 4 (line 145-153): isSuspicious(f) where f == 0.0 || f == 0.5 || f >= 1.0
             // Intave Check 4 (line 154): f < 0.0 || f > 1.0 → FLAG
             // Special case (line 90): If all three are 0.0, Intave allows it
@@ -629,7 +706,7 @@ public class Scaffold extends Module {
                 facingY = randomizeFacingValue(facingY);
                 facingZ = randomizeFacingValue(facingZ);
             } else {
-                // All zero is allowed, but add tiny random offset to avoid pattern
+                // All zero is allowed, but add tiny random offset to avoid pattern detection
                 facingX = (float) (Math.random() * 0.01);
                 facingY = (float) (Math.random() * 0.01);
                 facingZ = (float) (Math.random() * 0.01);
@@ -644,52 +721,64 @@ public class Scaffold extends Module {
     /**
      * Randomizes block face look vector values to bypass Intave 12 detection.
      * Avoids suspicious values: 0.0, 0.5, and >=1.0
-     * Intave checks: f == 0.0 || f == 0.5 || f >= 1.0
+     * Intave Check 4 (line 145-153): isSuspicious(f) where f == 0.0 || f == 0.5 || f >= 1.0
+     * If vl > 2 (all 3 values suspicious), scaffoldwalkVL increases (line 189-193)
+     * 
+     * Strategy: Ensure value is in safe range [0.05, 0.45] or [0.55, 0.95]
      */
     private float randomizeFacingValue(float value) {
-        // Special case: If all three values are 0.0, Intave allows it (line 90)
-        // But we still want to randomize individual suspicious values
+        // Check if value is suspicious (0.0, 0.5, or >=1.0)
+        boolean isSuspicious = Math.abs(value) < 0.001f || 
+                               Math.abs(value - 0.5f) < 0.001f || 
+                               value >= 1.0f || 
+                               value < 0.0f;
         
-        // If value is exactly 0.0, 0.5, or >=1.0, randomize it
-        if (Math.abs(value) < 0.001f) {
-            // 0.0 -> randomize to 0.01-0.49 or 0.51-0.99
+        if (isSuspicious) {
+            // Generate a completely safe random value
+            // Safe ranges: [0.05, 0.45] or [0.55, 0.95]
             if (Math.random() < 0.5) {
-                return (float) (Math.random() * 0.48 + 0.01); // 0.01 to 0.49
+                // Lower safe range: 0.05 to 0.45
+                return (float) (0.05 + Math.random() * 0.40);
             } else {
-                return (float) (Math.random() * 0.48 + 0.51); // 0.51 to 0.99
+                // Upper safe range: 0.55 to 0.95
+                return (float) (0.55 + Math.random() * 0.40);
             }
-        }
-        if (Math.abs(value - 0.5f) < 0.001f) {
-            // 0.5 -> randomize to avoid exact 0.5
-            // Return value in range 0.35-0.49 or 0.51-0.65 (avoiding 0.5)
-            if (Math.random() < 0.5) {
-                return (float) (Math.random() * 0.14 + 0.35); // 0.35 to 0.49
-            } else {
-                return (float) (Math.random() * 0.14 + 0.51); // 0.51 to 0.65
-            }
-        }
-        if (value >= 1.0f || value < 0.0f) {
-            // Invalid range -> clamp and randomize
-            float clamped = Math.max(0.01f, Math.min(0.99f, value));
-            if (Math.abs(clamped - 0.5f) < 0.05f) {
-                clamped = clamped < 0.5f ? 0.4f : 0.6f;
-            }
-            return clamped;
         }
         
-        // For legitimate values, add very small random offset to avoid pattern detection
-        // But keep it subtle to not break placements
-        float offset = (float) ((Math.random() - 0.5) * 0.015); // ±0.0075 offset (very subtle)
-        float newValue = value + offset;
+        // Value is not exactly suspicious, but check if it's close to suspicious values
+        // Add small randomization to avoid patterns while staying in safe range
         
-        // Clamp to valid range and avoid suspicious values
-        if (newValue < 0.01f) newValue = 0.01f;
-        if (newValue > 0.99f) newValue = 0.99f;
-        // Avoid 0.5 with a small margin
-        if (Math.abs(newValue - 0.5f) < 0.03f) {
-            newValue = newValue < 0.5f ? 0.47f : 0.53f;
+        // If too close to 0.0
+        if (value < 0.05f) {
+            return (float) (0.05 + Math.random() * 0.15); // 0.05 to 0.20
         }
-        return newValue;
+        
+        // If too close to 0.5 (within 0.05)
+        if (value > 0.45f && value < 0.55f) {
+            if (value < 0.5f) {
+                return (float) (0.35 + Math.random() * 0.10); // 0.35 to 0.45
+            } else {
+                return (float) (0.55 + Math.random() * 0.10); // 0.55 to 0.65
+            }
+        }
+        
+        // If too close to 1.0
+        if (value > 0.95f) {
+            return (float) (0.80 + Math.random() * 0.15); // 0.80 to 0.95
+        }
+        
+        // Value is already in safe range, add tiny variation to avoid exact patterns
+        float variation = (float) ((Math.random() - 0.5) * 0.02); // ±0.01
+        float result = value + variation;
+        
+        // Final safety clamp
+        if (result < 0.05f) result = 0.05f + (float)(Math.random() * 0.05);
+        if (result > 0.95f) result = 0.90f + (float)(Math.random() * 0.05);
+        if (result > 0.45f && result < 0.55f) {
+            result = result < 0.5f ? 0.42f : 0.58f;
+        }
+        
+        return result;
     }
 
     @SubscribeEvent
@@ -703,6 +792,9 @@ public class Scaffold extends Module {
     public void onPreUpdate(PreUpdateEvent e) {
         if (!isEnabled) {
             return;
+        }
+        if (pendingPlacement != null && pendingPlacementTick != mc.thePlayer.ticksExisted) {
+            clearPendingPlacement();
         }
         // LongJump.function removed - check isEnabled instead
         boolean longJumpEnabled = ModuleManager.longJump != null && ModuleManager.longJump.isEnabled();
@@ -798,6 +890,7 @@ public class Scaffold extends Module {
                 startYPos = -1;
                 lookVec = null;
                 lastPlacement = null;
+                clearPendingPlacement();
             }
         }
     }
@@ -824,10 +917,10 @@ public class Scaffold extends Module {
     public String getInfo() {
         String info;
         if (fastOnRMB.isToggled()) {
-            info = Mouse.isButtonDown(1) && Utils.tabbedIn() ? fastScaffoldModes[(int) fastScaffold.getInput()] : sprintModes[(int) sprint.getInput()];
+            info = Mouse.isButtonDown(1) && Utils.tabbedIn() ? FAST_SCAFFOLD_MODES[(int) fastScaffold.getInput()] : SPRINT_MODES[(int) sprint.getInput()];
         }
         else {
-            info = fastScaffold.getInput() > 0 ? fastScaffoldModes[(int) fastScaffold.getInput()] : sprintModes[(int) sprint.getInput()];
+            info = fastScaffold.getInput() > 0 ? FAST_SCAFFOLD_MODES[(int) fastScaffold.getInput()] : SPRINT_MODES[(int) sprint.getInput()];
         }
         if (info.equals("§cDisabled")) {
             return "Disabled";
@@ -856,9 +949,42 @@ public class Scaffold extends Module {
 
     public boolean sprint() {
         if (isEnabled) {
+            // Intave 12 bypass: Sprint control
+            // CelerityCheck (line 149-151): When placing block under within 380ms with negative Y velocity
+            // maxspeed is limited to 0.28, sprinting would exceed this
+            if (intaveBypass.isToggled() && intaveSprintControl.isToggled()) {
+                boolean recentPlacement = (System.currentTimeMillis() - lastPlacementTime) < 380;
+                boolean isFalling = mc.thePlayer.motionY < 0.0;
+                
+                // Intave Check 6 (line 240-247): Sprinting + falling with target not adjacent → VL increase
+                if (recentPlacement && isFalling && mc.thePlayer.isSprinting()) {
+                    // Control sprint to avoid detection
+                    // Only allow sprint if we're using fast scaffold modes
+                    if (handleFastScaffolds() == 0) {
+                        return false; // Don't sprint when falling and recently placed
+                    }
+                }
+            }
+            
             return handleFastScaffolds() > 0 || !holdingBlocks();
         }
         return false;
+    }
+    
+    /**
+     * Returns whether sprinting should be disabled for Intave bypass.
+     * Used by external modules to check scaffold sprint state.
+     */
+    public boolean shouldDisableSprintForIntave() {
+        if (!isEnabled || !intaveBypass.isToggled() || !intaveSprintControl.isToggled()) {
+            return false;
+        }
+        
+        boolean recentPlacement = (System.currentTimeMillis() - lastPlacementTime) < 380;
+        boolean isFalling = mc.thePlayer.motionY < 0.0;
+        
+        // CelerityCheck integration: Limit speed during scaffold
+        return recentPlacement && isFalling && handleFastScaffolds() == 0;
     }
 
     private int handleFastScaffolds() {
@@ -901,140 +1027,111 @@ public class Scaffold extends Module {
             return;
         }
         
-        // Intave 12 bypass: Add timing delay between placements to avoid pattern detection
-        // Intave Check 2 (line 122): diffToLastValidBlockPacket > 2000ms && valid → FLAG
-        // Intave line 137: Detects same Y-level placements - if (blockY - 2) matches previous within 0.1 blocks
-        // Intave line 138: Calculates balance from last 10 placement timings, flags if balance < 380.0
-        // Solution: Vary timing significantly when placing on same Y-level to increase balance
         long currentTime = System.currentTimeMillis();
-        boolean inAir = !mc.thePlayer.onGround;
-        boolean isJumping = mc.thePlayer.motionY > 0.0; // Moving upward
-        
-        // Check if placing on same Y-level as last placement (Intave line 137 detection)
-        // Intave checks: (blockY - 2) matches previous penaltyBlock.getY() within 0.1 blocks
-        // We track the actual Y-level and compare directly
-        int currentBlockY = block.blockPos.getY();
-        boolean sameYLevel = (lastPlacedBlockY != Integer.MIN_VALUE && 
-                              Math.abs(currentBlockY - lastPlacedBlockY) < 0.1);
-        
-        // For manual tower (player jumping), be very lenient with timing
-        if (lastPlacementTime > 0) {
-            long timeSinceLastPlacement = currentTime - lastPlacementTime;
-            long requiredDelay;
-            
-            // If player is jumping upward (manual tower), use no delay
-            if (isJumping && inAir) {
-                requiredDelay = 0; // No delay when manually jumping - allow fast placements
-            } else if (inAir) {
-                // Very short delay when in air (falling)
-                requiredDelay = MIN_PLACEMENT_DELAY_AIR + (long)(Math.random() * (MAX_PLACEMENT_DELAY_AIR - MIN_PLACEMENT_DELAY_AIR));
-            } else {
-                // Normal delay when on ground
-                requiredDelay = MIN_PLACEMENT_DELAY + (long)(Math.random() * (MAX_PLACEMENT_DELAY - MIN_PLACEMENT_DELAY));
-            }
-            
-            // Intave line 137 bypass: Add extra random delay when placing on same Y-level
-            // This varies the timing to increase balance and prevent flags
-            if (sameYLevel && !isJumping) {
-                long extraDelay = SAME_Y_LEVEL_EXTRA_DELAY_MIN + 
-                                 (long)(Math.random() * (SAME_Y_LEVEL_EXTRA_DELAY_MAX - SAME_Y_LEVEL_EXTRA_DELAY_MIN));
-                requiredDelay += extraDelay;
-            }
-            
-            if (timeSinceLastPlacement < requiredDelay) {
-                // Delay placement to avoid suspicious timing patterns
-                return;
-            }
-        }
-        
-        // Intave Check 2: Ensure we place within 2000ms of packet arrival
-        // Track when packet was sent and ensure placement happens soon after
-        if (lastBlockPlacePacketTime > 0) {
-            long timeSincePacket = currentTime - lastBlockPlacePacketTime;
-            if (timeSincePacket > 1800) {
-                // Too long since packet - might trigger Check 2, but allow if jumping
-                if (!isJumping && !inAir) {
-                    return; // Skip if on ground and too long since packet
-                }
-            }
-        }
-        
-        MovingObjectPosition raycast = RotationUtils.rayTraceCustom(mc.playerController.getBlockReachDistance(), RotationUtils.serverRotations[0], RotationUtils.serverRotations[1]);
-        
-        // Intave 12 bypass: Ensure target block matches placed block (distance check)
-        // Intave Check 5d (line 210-220): f4 > 0.0 && f4 < 1.0 && hsDist < 1.0 → FLAG if lastTimeSuspiciousForScaffoldWalk < 2000ms
-        // Intave Check 6 (line 240-247): Sprinting+falling with target NOT adjacent → increases scaffoldwalkVL
-        // Intave line 240: Checks if target is NOT (NORTH/EAST/SOUTH/WEST relative to placed block)
-        boolean isSprinting = mc.thePlayer.isSprinting();
+        boolean isJumping = mc.thePlayer.motionY > 0.0;
         boolean isFalling = mc.thePlayer.motionY < 0.0;
         
-        // Calculate hsDist (distance from block above head to player) - Intave uses this
-        double hsDist = block.blockPos.getY() + 1.0 - mc.thePlayer.posY;
-        if (hsDist < 0) hsDist = -hsDist; // Absolute distance
+        // Intave 12 bypass: Timing with variance to avoid balance detection
+        // Key insight: Intave uses BalanceUtils to detect low variance (machine-like) timing
+        // We need HIGH variance in placement intervals to appear human
+        if (intaveBypass.isToggled() && intaveTimingMode.getInput() > 0) {
+            if (lastPlacementTime > 0) {
+                long timeSinceLastPlacement = currentTime - lastPlacementTime;
+                
+                long requiredDelay;
+                if (intaveTimingVariance.isToggled()) {
+                    // High-variance timing to defeat balance checks
+                    // Intave calculates: balance = sum of (timing - avg)^2
+                    // Low balance = consistent timing = machine = FLAG
+                    // Solution: Alternate between short and long delays unpredictably
+                    requiredDelay = calculateVariedDelay(intaveTimingMode.getInput() == 1);
+                } else {
+                    // Simple random delay (less effective against balance checks)
+                    long minDelay = intaveTimingMode.getInput() == 1 ? 20 : 0;
+                    long maxDelay = intaveTimingMode.getInput() == 1 ? 50 : 20;
+                    requiredDelay = minDelay + (long)(Math.random() * (maxDelay - minDelay));
+                }
+                
+                if (timeSinceLastPlacement < requiredDelay) {
+                    return;
+                }
+            }
+        }
         
-        // Be very lenient when jumping (manual tower) to allow placements
-        // For manual tower, prioritize placement success over perfect target matching
-        if (raycast != null && raycast.typeOfHit == MovingObjectPosition.MovingObjectType.BLOCK) {
-            double distanceToTarget = raycast.getBlockPos().distanceSq(block.blockPos);
-            double distanceToTargetLinear = Math.sqrt(distanceToTarget);
-            
-            // If target block matches placed block exactly, use raycast hitVec (most accurate)
-            if (distanceToTarget < 0.1 && raycast.getBlockPos().equals(block.blockPos) && raycast.sideHit.equals(block.enumFacing)) {
-                block.hitVec = raycast.hitVec;
-            } 
-            // If target is close, use it but be careful about Intave Check 5d and Check 6
-            else if (distanceToTargetLinear < 1.0) {
-                // Intave Check 6: When sprinting and falling, target must be adjacent (NORTH/EAST/SOUTH/WEST)
-                // Intave line 240: Checks if target.getRelative(NORTH/EAST/SOUTH/WEST) != placed block
-                // This means: placed block must be adjacent to target block
-                // This is very strict (< 380ms window), so we need to ensure target matches
-                if (isSprinting && isFalling && !isJumping) {
-                    // Check if placed block is adjacent to target block (NORTH/EAST/SOUTH/WEST)
-                    BlockPos targetPos = raycast.getBlockPos();
-                    BlockPos placedPos = block.blockPos;
-                    boolean isAdjacent = (targetPos.add(0, 0, -1).equals(placedPos) ||  // NORTH
-                                         targetPos.add(1, 0, 0).equals(placedPos) ||   // EAST
-                                         targetPos.add(0, 0, 1).equals(placedPos) ||    // SOUTH
-                                         targetPos.add(-1, 0, 0).equals(placedPos)) && // WEST
-                                        targetPos.getY() == placedPos.getY();
-                    
-                    if (!isAdjacent && distanceToTargetLinear > 0.2) {
-                        // Placed block is not adjacent to target - skip to avoid Check 6
-                        // But only if not jumping (manual tower needs leniency)
-                        return;
-                    }
-                }
-                // Intave Check 5d: If distance > 0.0 && < 1.0 && hsDist < 1.0, might flag
-                // Use raycast hitVec if it matches the block and facing to minimize distance
-                if (raycast.getBlockPos().equals(block.blockPos) && raycast.sideHit.equals(block.enumFacing)) {
+        // Get raycast for target validation
+        MovingObjectPosition raycast = RotationUtils.rayTraceCustom(mc.playerController.getBlockReachDistance(), RotationUtils.serverRotations[0], RotationUtils.serverRotations[1]);
+        
+        // Intave 12 bypass: Target validation
+        // Check 5c (line 210-220): If targetBlock.distance(placedBlock) is 0 < f4 < 1 AND hsDist < 1.0
+        // It sets lastTimeSuspiciousForScaffoldWalk, then FLAGS on 2nd occurrence within 2000ms
+        // Solution: Use the raycast block as placement target when possible, or ensure hitVec is accurate
+        if (intaveBypass.isToggled() && intaveTargetValidation.isToggled()) {
+            boolean invalidTarget = false;
+            if (raycast != null && raycast.typeOfHit == MovingObjectPosition.MovingObjectType.BLOCK) {
+                // If our raycast hits the block we want to place against, use its hitVec
+                // This ensures server-side getTargetBlock() matches our placement
+                if (raycast.getBlockPos().equals(block.blockPos)) {
                     block.hitVec = raycast.hitVec;
-                } else if (hsDist < 1.0 && distanceToTargetLinear > 0.0 && distanceToTargetLinear < 1.0 && !isJumping) {
-                    // Intave Check 5d condition - only be careful if not jumping
-                    // When jumping, allow placement even if target doesn't match perfectly
-                    if (raycast.getBlockPos().equals(block.blockPos)) {
-                        block.hitVec = raycast.hitVec;
+                } else {
+                    // Raycast hits different block - this is the problematic case for Check 5c
+                    // Calculate distance: if 0 < dist < 1 and hsDist < 1, Intave gets suspicious
+                    double targetDist = Math.sqrt(raycast.getBlockPos().distanceSq(block.blockPos));
+                    double hsDist = Math.abs(block.blockPos.getY() + 1.0 - mc.thePlayer.posY);
+                    
+                    // Check 5c condition: f4 > 0 && f4 < 1 && hsDist < 1.0
+                    // If this condition is true, Intave will flag on 2nd block
+                    // We can't change what server sees, but we CAN place against the raycast block instead
+                    if (targetDist > 0.0 && targetDist < 1.0 && hsDist < 1.0) {
+                        // Try to place against the block we're actually looking at if valid
+                        BlockPos lookingAt = raycast.getBlockPos();
+                        BlockPos placePos = lookingAt.offset(raycast.sideHit);
+                        
+                        // Check if we can place at this position instead
+                        if (BlockUtils.replaceable(placePos) && !BlockUtils.replaceable(lookingAt) &&
+                                !BlockUtils.isInteractable(BlockUtils.getBlock(lookingAt))) {
+                            // Use the block we're looking at - this prevents Check 5c
+                            block.blockPos = lookingAt;
+                            block.enumFacing = raycast.sideHit;
+                            block.hitVec = raycast.hitVec;
+                        } else {
+                            invalidTarget = true;
+                        }
                     }
                 }
-            } 
-            // Target is far - only skip if on ground (allow in air for manual tower)
-            else if (!isJumping && !inAir && distanceToTargetLinear > 1.5) {
-                // Skip if on ground and target is too far (> 1.5 blocks)
+            }
+            if (invalidTarget) {
                 return;
             }
-            // When jumping or in air, allow placement even if target doesn't match perfectly
-            // This is critical for manual tower to work
-        } else if (isJumping || inAir) {
-            // When jumping/in air and no raycast, still allow placement
-            // Manual tower needs to work even if raycast doesn't hit perfectly
+        }
+        
+        // Check 6 (line 240-247): Sprinting + falling + target NOT adjacent to placed block
+        // Only skip if sprint control is enabled AND we're in a risky situation
+        if (intaveBypass.isToggled() && intaveSprintControl.isToggled()) {
+            if (mc.thePlayer.isSprinting() && isFalling && !isJumping) {
+                if (raycast != null && raycast.typeOfHit == MovingObjectPosition.MovingObjectType.BLOCK) {
+                    BlockPos targetPos = raycast.getBlockPos();
+                    BlockPos placedPos = block.blockPos;
+                    
+                    // Check if target is adjacent (NORTH/EAST/SOUTH/WEST) to placed block
+                    boolean isAdjacent = targetPos.equals(placedPos) ||
+                                        targetPos.add(0, 0, -1).equals(placedPos) ||
+                                        targetPos.add(1, 0, 0).equals(placedPos) ||
+                                        targetPos.add(0, 0, 1).equals(placedPos) ||
+                                        targetPos.add(-1, 0, 0).equals(placedPos);
+                    
+                    // Also check if target is the block we're placing against
+                    if (!isAdjacent) {
+                        // Intave will increase scaffoldwalkVL - disable sprint temporarily
+                        mc.thePlayer.setSprinting(false);
+                    }
+                }
+            }
         }
         
         // Set compatibility fields
-        // Create MovingObjectPosition for compatibility (using raycast if available, otherwise create from block data)
         if (raycast != null && raycast.typeOfHit == MovingObjectPosition.MovingObjectType.BLOCK && raycast.getBlockPos().equals(block.blockPos) && raycast.sideHit.equals(block.enumFacing)) {
             placeBlock = raycast;
         } else {
-            // Create a basic MovingObjectPosition for compatibility (constructor: Vec3 hitVec, EnumFacing sideHit, BlockPos blockPos)
-            // Use block.hitVec directly - randomization happens in onSendPacket via block face offsets
             Vec3 hitVecForMOP = block.hitVec != null ? block.hitVec : new Vec3(block.blockPos.getX() + 0.5, block.blockPos.getY() + 0.5, block.blockPos.getZ() + 0.5);
             placeBlock = new MovingObjectPosition(hitVecForMOP, block.enumFacing, block.blockPos);
         }
@@ -1043,23 +1140,42 @@ public class Scaffold extends Module {
         placeYaw = RotationUtils.serverRotations[0];
         placePitch = RotationUtils.serverRotations[1];
         
-        // Intave 12 bypass: Ensure placement happens soon after packet to avoid Check 2
-        // The packet is sent by onPlayerRightClick, so we track it here
+        // Execute placement
         if (mc.playerController.onPlayerRightClick(mc.thePlayer, mc.theWorld, heldItem, block.blockPos, block.enumFacing, block.hitVec)) {
-            // Update last placement time and packet time
+            // Track timing for variance calculation
+            if (lastPlacementTime > 0 && intaveBypass.isToggled() && intaveTimingVariance.isToggled()) {
+                long interval = currentTime - lastPlacementTime;
+                placementTimings[timingIndex] = interval;
+                timingIndex = (timingIndex + 1) % placementTimings.length;
+                placementCount++;
+            }
             lastPlacementTime = currentTime;
-            lastBlockPlacePacketTime = currentTime; // Packet sent now
-            lastPlacedBlockY = block.blockPos.getY(); // Track Y-level for Intave line 137 detection
+            
+            // Intave 12 bypass: Click variation to break 1:1 click-to-place ratio
+            // MachineBlockCheck detects if clicks == 1 per placement (perfect efficiency)
+            // Intave tracks PlayerInteractEvent (right-clicks), not swings
+            // Humans typically spam right-click or occasionally miss, so we simulate extra interactions
+            if (intaveBypass.isToggled() && intaveClickVariation.isToggled()) {
+                extraClickCounter++;
+                
+                // Every 2-4 placements, send 1-2 extra right-click packets
+                int extraClickThreshold = 2 + intaveRandom.nextInt(3); // 2, 3, or 4
+                if (extraClickCounter >= extraClickThreshold) {
+                    extraClickCounter = 0;
+                    int extraClicks = 1 + intaveRandom.nextInt(2); // 1 or 2 extra
+                    
+                    for (int i = 0; i < extraClicks; i++) {
+                        // Send an extra block interact on the same target (RIGHT_CLICK_BLOCK)
+                        // This increments click counters without placing a new block.
+                        sendExtraBlockInteract(heldItem, block);
+                    }
+                }
+            }
             
             if (silentSwing.isToggled()) {
                 mc.thePlayer.sendQueue.addToSendQueue(new C0APacketAnimation());
-            }
-            else {
+            } else {
                 mc.thePlayer.swingItem();
-                // ModuleManager.autoSwap.spoofItem removed - AutoSwap doesn't have this field
-                // if (!(autoSwap.isToggled() && ModuleManager.autoSwap.spoofItem.isToggled())) {
-                //     mc.getItemRenderer().resetEquippedProgress();
-                // }
                 mc.getItemRenderer().resetEquippedProgress();
             }
             highlight.put(block.blockPos.offset(block.enumFacing), null);
@@ -1093,7 +1209,57 @@ public class Scaffold extends Module {
         return totalBlocks;
     }
 
+    private boolean shouldDelayPlacementForIntave() {
+        return intaveBypass.isToggled();
+    }
+
+    private void queuePlacement(int yOffset, int xOffset) {
+        if (pendingPlacement != null) {
+            return;
+        }
+        locateBlocks(yOffset, xOffset);
+        if (blockInfo == null) {
+            return;
+        }
+        lastPlacement = blockInfo;
+        pendingPlacement = blockInfo;
+        pendingPlacementTick = mc.thePlayer.ticksExisted;
+        blockInfo = null;
+    }
+
+    private void clearPendingPlacement() {
+        pendingPlacement = null;
+        pendingPlacementTick = -1;
+    }
+
+    private void sendExtraBlockInteract(ItemStack heldItem, PlaceData block) {
+        if (block == null || block.blockPos == null || block.enumFacing == null) {
+            return;
+        }
+        Vec3 vec = block.hitVec != null
+                ? block.hitVec
+                : new Vec3(block.blockPos.getX() + 0.5, block.blockPos.getY() + 0.5, block.blockPos.getZ() + 0.5);
+        float hitX = (float) (vec.xCoord - block.blockPos.getX());
+        float hitY = (float) (vec.yCoord - block.blockPos.getY());
+        float hitZ = (float) (vec.zCoord - block.blockPos.getZ());
+        hitX = MathHelper.clamp_float(hitX, 0.0F, 1.0F);
+        hitY = MathHelper.clamp_float(hitY, 0.0F, 1.0F);
+        hitZ = MathHelper.clamp_float(hitZ, 0.0F, 1.0F);
+        if (intaveBypass.isToggled()) {
+            hitX = randomizeFacingValue(hitX);
+            hitY = randomizeFacingValue(hitY);
+            hitZ = randomizeFacingValue(hitZ);
+        }
+        mc.thePlayer.sendQueue.addToSendQueue(
+                new C08PacketPlayerBlockPlacement(block.blockPos, block.enumFacing.getIndex(), heldItem, hitX, hitY, hitZ)
+        );
+    }
+
     private void placeBlock(int yOffset, int xOffset) {
+        if (shouldDelayPlacementForIntave()) {
+            queuePlacement(yOffset, xOffset);
+            return;
+        }
         locateAndPlaceBlock(yOffset, xOffset);
         int input = (int) multiPlace.getInput();
         if (sprint.getInput() == 0 && mc.thePlayer.onGround && !ModuleManager.tower.canTower() && !usingFastScaffold()) {
@@ -1151,6 +1317,9 @@ public class Scaffold extends Module {
         int blockZ = blockInfo2.blockPos.getZ();
         EnumFacing blockFacing = lastPlacedFacing = blockInfo2.enumFacing;
         blockInfo = blockInfo2;
+        if (intaveBypass.isToggled() && intaveTargetValidation.isToggled()) {
+            targetBlock = new Vec3(blockX, blockY, blockZ);
+        }
 
         // Calculate hitVec - the randomization will be applied in onSendPacket via block face offsets
         // Keep hitVec calculation similar to reference for placement accuracy
@@ -1332,29 +1501,86 @@ public class Scaffold extends Module {
     }
 
     private void handleMotion() {
-        if (ModuleManager.tower.canTower() || !mc.thePlayer.onGround || motion.getInput() == 1) {
+        // Skip if tower mode, in air, or motion is vanilla (100%)
+        if (ModuleManager.tower.canTower() || !mc.thePlayer.onGround || motion.getInput() == 100) {
             return;
         }
-        double input = (motion.getInput() / 100);
         
-        // Intave 12 bypass: Add variation to motion to avoid consistent XZ motion ratio detection
-        // Intave Check 7 (line 299-305): Detects xzConjToLastxz < 0.4 OR (xzConjToLastxz ≈ 1.0 && !sneaking)
-        // When placing blocks under player within 500ms, XZ motion must vary
-        // Variation should be significant enough to avoid < 0.4 ratio but not too much to break movement
-        double variationX = 1.0 + (Math.random() - 0.5) * 0.04; // ±2% variation (increased)
-        double variationZ = 1.0 + (Math.random() - 0.5) * 0.04;
-        
-        // Ensure variation doesn't create exact 1.0 ratio (suspicious when not sneaking)
-        if (Math.abs(variationX - variationZ) < 0.01 && !mc.thePlayer.isSneaking()) {
-            // If ratios are too similar, add more variation
-            variationX += (Math.random() - 0.5) * 0.02;
-            variationZ += (Math.random() - 0.5) * 0.02;
+        // If MoveFix is enabled, don't manually modify motion
+        // The rotation handler will properly adjust movement inputs
+        if (intaveBypass.isToggled() && intaveMovementFix.isToggled()) {
+            return;
         }
         
-        mc.thePlayer.motionX *= input * variationX;
-        mc.thePlayer.motionZ *= input * variationZ;
+        // Use MoveUtil.strafe() for proper motion modification (from reference impl)
+        // This is the correct way to modify speed while maintaining proper movement direction
+        // Note: Still not fully compatible with Grim but better than direct motion modification
+        if (Utils.isMoving()) {
+            double input = motion.getInput() / 100.0;
+            MoveUtil.strafe(MoveUtil.speed() * input);
+        }
     }
-
+    
+    /**
+     * Calculates a varied delay to defeat Intave's balance check.
+     * 
+     * Intave uses BalanceUtils.getSquaredBalanceFromLong() which calculates:
+     * balance = sum((timing[i] - average)^2) / count
+     * 
+     * Low balance = consistent timing = machine-like = FLAG
+     * High balance = varied timing = human-like = PASS
+     * 
+     * Strategy: Alternate between short and long delays with randomness
+     * to create high variance while still being fast enough to scaffold.
+     */
+    private long calculateVariedDelay(boolean safeMode) {
+        // Base ranges for safe/aggressive modes
+        // Safe: 25-140ms range, Aggressive: 8-90ms range
+        long minBase = safeMode ? 25 : 8;
+        long maxBase = safeMode ? 140 : 90;
+        long spikeExtra = safeMode ? 80 : 50;
+        long maxClamp = maxBase + spikeExtra;
+        
+        // Use placement count to create a pattern with high variance
+        // Every few placements, use a noticeably different delay
+        int pattern = placementCount % 6;
+        
+        long delay;
+        switch (pattern) {
+            case 0:
+                // Short delay
+                delay = minBase + intaveRandom.nextInt(12);
+                break;
+            case 1:
+                // Medium-short delay
+                delay = minBase + 15 + intaveRandom.nextInt(25);
+                break;
+            case 2:
+                // Medium delay
+                delay = (minBase + maxBase) / 2 + intaveRandom.nextInt(30) - 15;
+                break;
+            case 3:
+                // Long delay (creates high variance)
+                delay = maxBase - 35 + intaveRandom.nextInt(30);
+                break;
+            case 4:
+                // Occasional spike delay to increase balance variance
+                delay = maxBase + 10 + intaveRandom.nextInt((int) spikeExtra);
+                break;
+            case 5:
+            default:
+                // Random in full range
+                delay = minBase + intaveRandom.nextInt((int)(maxBase - minBase));
+                break;
+        }
+        
+        // Add additional random jitter (±8ms) for extra unpredictability
+        delay += intaveRandom.nextInt(17) - 8;
+        
+        // Clamp to valid range
+        return Math.max(minBase, Math.min(maxClamp, delay));
+    }
+    
     public float hardcodedYaw() {
         float simpleYaw = 0F;
         float f = 0.8F;

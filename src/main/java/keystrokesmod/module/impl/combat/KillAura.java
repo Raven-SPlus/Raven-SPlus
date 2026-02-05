@@ -98,6 +98,39 @@ public class KillAura extends IAutoClicker {
     public final SliderSetting inertiaMaxSpeed;
     public final SliderSetting inertiaFriction;
     public final SliderSetting inertiaDeadZone;
+    
+    // Advanced Rotation Mode Settings
+    public final ModeSetting advAimPointMode;
+    public final SliderSetting advAimOffset;
+    public final ButtonSetting advPrediction;
+    public final SliderSetting advPredictionStrength;
+    public final ModeSetting advPredictionMode;
+    public final SliderSetting advSmoothingBase;
+    public final SliderSetting advSmoothingVar;
+    public final SliderSetting advAcceleration;
+    public final SliderSetting advYawPitchRatio;
+    public final ButtonSetting advNoise;
+    public final SliderSetting advNoiseH;
+    public final SliderSetting advNoiseV;
+    public final SliderSetting advNoiseSpeed;
+    public final ModeSetting advGcdMode;
+    public final SliderSetting advGcdVariance;
+    public final ButtonSetting advSensitivitySim;
+    public final SliderSetting advSensitivity;
+    public final ButtonSetting advEntropyBypass;
+    public final SliderSetting advEntropyVariance;
+    public final ButtonSetting advStrafeDesync;
+    public final SliderSetting advStrafeDesyncChance;
+    public final ButtonSetting advFactorBypass;
+    public final ButtonSetting advConstantBypass;
+    public final ButtonSetting advSmoothBypass;
+    public final ButtonSetting advPatternDiversity;
+    public final ButtonSetting advModuloBypass;
+    public final ButtonSetting advCombatAwareness;
+    public final ButtonSetting advMicroCorrection;
+    public final SliderSetting advMicroCorrectionStr;
+    public final ButtonSetting advOvershoot;
+    public final SliderSetting advOvershootAmount;
 
     public final ModeSetting targetingMode;
     public final ModeSetting sortMode;
@@ -237,8 +270,8 @@ public class KillAura extends IAutoClicker {
         this.registerSetting(new DescriptionSetting("Rotation"));
         this.registerSetting(rotationMode = new ModeSetting("Rotation", rotationModes, 1));
         final ModeOnly doRotation = new ModeOnly(rotationMode, 1, 2);
-        // Removed General mode (previously index 4) due to unstable behavior
-        this.registerSetting(rotationAlgorithmMode = new ModeSetting("Rotation mode", new String[]{"Classic", "Vulcan / V2", "Inertia", "Grim", "General"}, 0, doRotation));
+        // Rotation algorithm modes
+        this.registerSetting(rotationAlgorithmMode = new ModeSetting("Rotation mode", new String[]{"Classic", "Vulcan / V2", "Inertia", "Grim", "General", "Advanced"}, 0, doRotation));
         final java.util.function.Supplier<Boolean> classicMode = doRotation.extend(() -> rotationAlgorithmMode.getInput() == 0);
         final java.util.function.Supplier<Boolean> v2RotationMode = doRotation.extend(() -> rotationAlgorithmMode.getInput() == 1);
         final java.util.function.Supplier<Boolean> inertiaRotationMode = doRotation.extend(() -> rotationAlgorithmMode.getInput() == 2);
@@ -247,6 +280,7 @@ public class KillAura extends IAutoClicker {
             return algo == 1 || algo == 2 || algo == 4;
         });
         final java.util.function.Supplier<Boolean> grimRotationMode = doRotation.extend(() -> rotationAlgorithmMode.getInput() == 3);
+        final java.util.function.Supplier<Boolean> advancedRotationMode = doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5);
         this.registerSetting(minRotationSpeed = new SliderSetting("Min rotation speed", 8, 0, 10, 0.05, classicMode));
         this.registerSetting(maxRotationSpeed = new SliderSetting("Max rotation speed", 10, 0, 10, 0.05, classicMode));
         this.registerSetting(v2MinRotationSpeed = new SliderSetting("Min rotation speed", 2, 2, 20, 0.1, v2RotationMode));
@@ -318,6 +352,59 @@ public class KillAura extends IAutoClicker {
             int algo = (int) rotationAlgorithmMode.getInput();
             return (algo == 0 && delayAim.isToggled()) || ((algo == 1 || algo == 2 || algo == 4) && v2DelayAim.isToggled());
         })));
+        
+        // === Advanced Mode Settings ===
+        this.registerSetting(new DescriptionSetting("Advanced Settings", advancedRotationMode));
+        
+        // Aim Point Settings
+        this.registerSetting(advAimPointMode = new ModeSetting("Aim point", new String[]{"Center", "Eyes", "Feet", "Nearest", "Adaptive"}, 4, advancedRotationMode));
+        this.registerSetting(advAimOffset = new SliderSetting("Aim offset", 0.0, -1.0, 1.0, 0.05, advancedRotationMode));
+        
+        // Prediction Settings
+        this.registerSetting(advPrediction = new ButtonSetting("Prediction", true, advancedRotationMode));
+        this.registerSetting(advPredictionStrength = new SliderSetting("Prediction strength", 0.5, 0.0, 1.0, 0.05, doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advPrediction.isToggled())));
+        this.registerSetting(advPredictionMode = new ModeSetting("Prediction mode", new String[]{"Linear", "Cubic", "Exponential"}, 0, doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advPrediction.isToggled())));
+        
+        // Smoothing Settings
+        this.registerSetting(new DescriptionSetting("Smoothing", advancedRotationMode));
+        this.registerSetting(advSmoothingBase = new SliderSetting("Smoothing base", 0.4, 0.1, 1.0, 0.05, advancedRotationMode));
+        this.registerSetting(advSmoothingVar = new SliderSetting("Smoothing variance", 0.15, 0.0, 0.5, 0.01, advancedRotationMode));
+        this.registerSetting(advAcceleration = new SliderSetting("Acceleration", 0.3, 0.0, 1.0, 0.05, advancedRotationMode));
+        this.registerSetting(advYawPitchRatio = new SliderSetting("Yaw/Pitch ratio", 1.2, 0.5, 2.0, 0.1, advancedRotationMode));
+        
+        // Noise Settings
+        this.registerSetting(new DescriptionSetting("Noise", advancedRotationMode));
+        this.registerSetting(advNoise = new ButtonSetting("Noise", true, advancedRotationMode));
+        this.registerSetting(advNoiseH = new SliderSetting("Noise horizontal", 0.4, 0.0, 1.5, 0.05, doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advNoise.isToggled())));
+        this.registerSetting(advNoiseV = new SliderSetting("Noise vertical", 0.3, 0.0, 1.5, 0.05, doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advNoise.isToggled())));
+        this.registerSetting(advNoiseSpeed = new SliderSetting("Noise speed", 0.5, 0.1, 1.0, 0.05, doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advNoise.isToggled())));
+        
+        // GCD Settings
+        this.registerSetting(new DescriptionSetting("GCD & Mouse", advancedRotationMode));
+        this.registerSetting(advGcdMode = new ModeSetting("GCD mode", new String[]{"Off", "Basic", "Dynamic", "Adaptive"}, 3, advancedRotationMode));
+        this.registerSetting(advGcdVariance = new SliderSetting("GCD variance", 0.15, 0.0, 0.5, 0.01, doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advGcdMode.getInput() >= 2)));
+        this.registerSetting(advSensitivitySim = new ButtonSetting("Sensitivity simulation", true, advancedRotationMode));
+        this.registerSetting(advSensitivity = new SliderSetting("Simulated sensitivity", 100, 50, 200, 1, doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advSensitivitySim.isToggled())));
+        
+        // Anti-Cheat Bypass Settings
+        this.registerSetting(new DescriptionSetting("Anti-Detection", advancedRotationMode));
+        this.registerSetting(advEntropyBypass = new ButtonSetting("Entropy bypass", true, advancedRotationMode));
+        this.registerSetting(advEntropyVariance = new SliderSetting("Entropy variance", 0.12, 0.05, 0.3, 0.01, doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advEntropyBypass.isToggled())));
+        this.registerSetting(advStrafeDesync = new ButtonSetting("Strafe desync", true, advancedRotationMode));
+        this.registerSetting(advStrafeDesyncChance = new SliderSetting("Desync chance", 30, 10, 80, 5, "%", doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advStrafeDesync.isToggled())));
+        this.registerSetting(advFactorBypass = new ButtonSetting("Factor bypass", true, advancedRotationMode));
+        this.registerSetting(advConstantBypass = new ButtonSetting("Constant bypass", true, advancedRotationMode));
+        this.registerSetting(advSmoothBypass = new ButtonSetting("Smooth bypass", true, advancedRotationMode));
+        this.registerSetting(advPatternDiversity = new ButtonSetting("Pattern diversity", true, advancedRotationMode));
+        this.registerSetting(advModuloBypass = new ButtonSetting("Modulo bypass", true, advancedRotationMode));
+        
+        // Combat State Settings
+        this.registerSetting(new DescriptionSetting("Combat", advancedRotationMode));
+        this.registerSetting(advCombatAwareness = new ButtonSetting("Combat awareness", true, advancedRotationMode));
+        this.registerSetting(advMicroCorrection = new ButtonSetting("Micro-correction", true, advancedRotationMode));
+        this.registerSetting(advMicroCorrectionStr = new SliderSetting("Correction strength", 0.3, 0.1, 0.8, 0.05, doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advMicroCorrection.isToggled())));
+        this.registerSetting(advOvershoot = new ButtonSetting("Overshoot", false, advancedRotationMode));
+        this.registerSetting(advOvershootAmount = new SliderSetting("Overshoot amount", 0.1, 0.0, 0.5, 0.01, doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advOvershoot.isToggled())));
         
         this.registerSetting(new DescriptionSetting("Targets"));
         this.registerSetting(targetingMode = new ModeSetting("Targeting mode", new String[]{"Single", "Switch"}, 0));
