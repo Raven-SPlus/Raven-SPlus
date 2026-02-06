@@ -45,21 +45,58 @@ public abstract class MixinEntity {
 
     /**
      * @author strangerrs
-     * @reason moveFlying mixin
+     * @reason moveFlying mixin with Continuous MoveFix support
      */
     @Inject(method = "moveFlying", at = @At("HEAD"), cancellable = true)
     public void moveFlying(float p_moveFlying_1_, float p_moveFlying_2_, float p_moveFlying_3_, CallbackInfo ci) {
         float yaw = ((Entity)(Object) this).rotationYaw;
         if((Object) this instanceof EntityPlayerSP) {
-            PrePlayerInputEvent prePlayerInput = new PrePlayerInputEvent(p_moveFlying_1_, p_moveFlying_2_, p_moveFlying_3_, RotationHandler.getMovementYaw((Entity) (Object) this));
-            net.minecraftforge.common.MinecraftForge.EVENT_BUS.post(prePlayerInput);
-            if (prePlayerInput.isCanceled()) {
-                return;
+            float serverYaw = RotationHandler.getMovementYaw((Entity) (Object) this);
+            
+            // Continuous MoveFix: apply rotation correction here using continuous math.
+            // Instead of snapping inputs to {-1, 0, 1} (which causes speed jumps that
+            // trigger Intave's Gate 1 motion check), we rotate the strafe/forward vector
+            // by the yaw difference WITHOUT rounding. The rotation matrix preserves exact
+            // vector magnitude, so XZ speed stays perfectly constant at terminal velocity.
+            // Reference: FireBounce's applyStrafeToPlayer (Rotation.kt).
+            if (RotationHandler.getMoveFix() == RotationHandler.MoveFix.Continuous) {
+                float clientYaw = ((Entity)(Object) this).rotationYaw;
+                float diff = (clientYaw - serverYaw) * 3.1415927F / 180.0F;
+                float cosD = MathHelper.cos(diff);
+                float sinD = MathHelper.sin(diff);
+                
+                // Rotate inputs by yaw difference (continuous, no rounding)
+                float newForward = p_moveFlying_2_ * cosD + p_moveFlying_1_ * sinD;
+                float newStrafe  = p_moveFlying_1_ * cosD - p_moveFlying_2_ * sinD;
+                
+                p_moveFlying_1_ = newStrafe;
+                p_moveFlying_2_ = newForward;
+                yaw = serverYaw; // Use server yaw for the final sin/cos
+                
+                // Fire event with already-corrected values
+                PrePlayerInputEvent prePlayerInput = new PrePlayerInputEvent(p_moveFlying_1_, p_moveFlying_2_, p_moveFlying_3_, yaw);
+                net.minecraftforge.common.MinecraftForge.EVENT_BUS.post(prePlayerInput);
+                if (prePlayerInput.isCanceled()) {
+                    ci.cancel();
+                    return;
+                }
+                p_moveFlying_1_ = prePlayerInput.getStrafe();
+                p_moveFlying_2_ = prePlayerInput.getForward();
+                p_moveFlying_3_ = prePlayerInput.getFriction();
+                yaw = prePlayerInput.getYaw();
+            } else {
+                // Standard path: RotationHandler already adjusted inputs for Silent mode
+                PrePlayerInputEvent prePlayerInput = new PrePlayerInputEvent(p_moveFlying_1_, p_moveFlying_2_, p_moveFlying_3_, serverYaw);
+                net.minecraftforge.common.MinecraftForge.EVENT_BUS.post(prePlayerInput);
+                if (prePlayerInput.isCanceled()) {
+                    ci.cancel();
+                    return;
+                }
+                p_moveFlying_1_ = prePlayerInput.getStrafe();
+                p_moveFlying_2_ = prePlayerInput.getForward();
+                p_moveFlying_3_ = prePlayerInput.getFriction();
+                yaw = prePlayerInput.getYaw();
             }
-            p_moveFlying_1_ = prePlayerInput.getStrafe();
-            p_moveFlying_2_ = prePlayerInput.getForward();
-            p_moveFlying_3_ = prePlayerInput.getFriction();
-            yaw = prePlayerInput.getYaw();
         }
 
         float f = p_moveFlying_1_ * p_moveFlying_1_ + p_moveFlying_2_ * p_moveFlying_2_;

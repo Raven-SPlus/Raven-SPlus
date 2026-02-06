@@ -63,6 +63,12 @@ public class Scaffold extends Module {
     private ButtonSetting intaveClickVariation;
     private ButtonSetting intaveTimingVariance;
     private ButtonSetting intaveMovementFix;
+    // Choose which MoveFix strategy to use when Intave bypass is active.
+    // 0 = Silent (discrete snapping, better for some checks, worse for motion consistency)
+    // 1 = Continuous (smooth rotation correction in moveFlying)
+    // 2 = None (vanilla movement, safer for Grim Simulation/RotationPlace)
+    private ModeSetting intaveMoveFixMode;
+    private ButtonSetting intaveLockView;
 
     // Mode options
     private static final String[] ROTATION_MODES = {"Disabled", "Simple", "Offset", "Precise"};
@@ -84,8 +90,6 @@ public class Scaffold extends Module {
     private Vec3 targetBlock;
     private PlaceData blockInfo;
     private PlaceData lastPlacement;
-    private PlaceData pendingPlacement;
-    private int pendingPlacementTick = -1;
     private EnumFacing lastPlacedFacing;
     private Vec3 hitVec, lookVec;
     private float[] blockRotations;
@@ -118,6 +122,9 @@ public class Scaffold extends Module {
     private float fakeYaw, fakePitch;
     private boolean set2;
     private boolean was451, was452;
+    // Visual rotation smoothing
+    private float lastVisualYaw, lastVisualPitch;
+    private boolean hasLastVisualRotation;
 
     // Module state
     public boolean moduleEnabled;
@@ -135,8 +142,11 @@ public class Scaffold extends Module {
     private long[] placementTimings = new long[8]; // Store last 8 placement intervals for variance
     private int timingIndex = 0;
     private int placementCount = 0;
-    private int extraClickCounter = 0; // Track when to send extra clicks
     private java.util.Random intaveRandom = new java.util.Random();
+    
+    // Intave bypass: extra click state for Check 7 (click ratio)
+    private BlockPos lastPlacedBlockPos = null;
+    private EnumFacing lastPlacedExtraFacing = null;
     
     // Compatibility fields for old API
     public ButtonSetting tower;
@@ -176,6 +186,8 @@ public class Scaffold extends Module {
         this.registerSetting(intaveClickVariation = new ButtonSetting("Click Variation", true));
         this.registerSetting(intaveTimingVariance = new ButtonSetting("Timing Variance", true));
         this.registerSetting(intaveMovementFix = new ButtonSetting("Movement Fix", true));
+        this.registerSetting(intaveMoveFixMode = new ModeSetting("MoveFix Mode", new String[]{"Silent", "Continuous", "None"}, 1));
+        this.registerSetting(intaveLockView = new ButtonSetting("Lock View", false));
         
         // Compatibility settings
         this.registerSetting(tower = new ButtonSetting("Tower", false));
@@ -191,8 +203,8 @@ public class Scaffold extends Module {
         placeBlock = null;
         rayCasted = null;
         place = false;
-        pendingPlacement = null;
-        pendingPlacementTick = -1;
+        lastPlacedBlockPos = null;
+        lastPlacedExtraFacing = null;
         if (scaffoldBlockCount != null) {
             scaffoldBlockCount.beginFade();
         }
@@ -226,9 +238,9 @@ public class Scaffold extends Module {
         placementTimings = new long[8];
         timingIndex = 0;
         placementCount = 0;
-        extraClickCounter = 0;
-        pendingPlacement = null;
-        pendingPlacementTick = -1;
+        lastPlacedBlockPos = null;
+        lastPlacedExtraFacing = null;
+        hasLastVisualRotation = false;
     }
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
@@ -252,10 +264,6 @@ public class Scaffold extends Module {
         
         // Update ScaffoldUtils ticks
         ScaffoldUtils.updateTicks();
-        
-        // Update server rotations for raycast
-        RotationUtils.serverRotations[0] = e.getYaw();
-        RotationUtils.serverRotations[1] = e.getPitch();
         
         if (Utils.isMoving()) {
             scaffoldTicks++;
@@ -340,12 +348,31 @@ public class Scaffold extends Module {
             fakeYaw1 = clientYaw - hardcodedYaw();
         }
 
-        switch ((int) rotation.getInput()) {
+        int rotMode = (int) rotation.getInput();
+        // For Intave bypass + Lock View, force Precise rotation mode to avoid
+        // 180° flips from Simple / Offset modes and always aim at the block face.
+        if (intaveBypass.isToggled() && intaveLockView.isToggled() && rotMode != 0) {
+            rotMode = 3;
+        }
+
+        switch (rotMode) {
             case 1:
                 scaffoldYaw = clientYaw - hardcodedYaw();
-                scaffoldPitch = 79F;
-                if (currentFace == 1) {
-                    scaffoldPitch = 87F;
+                if (intaveBypass.isToggled()) {
+                    // Lower pitch so server's getTargetBlock() returns the SUPPORT block
+                    // behind the player, not the block directly under.
+                    // At pitch >= ~73°, the raycast from eye hits the block under feet first.
+                    // At pitch ~68-72°, the raycast passes over the placed block and hits 
+                    // the support block behind -> Check 6 target adjacency test passes.
+                    scaffoldPitch = 72F;
+                    if (currentFace == 1) {
+                        scaffoldPitch = 78F;
+                    }
+                } else {
+                    scaffoldPitch = 79F;
+                    if (currentFace == 1) {
+                        scaffoldPitch = 87F;
+                    }
                 }
                 e.setYaw(scaffoldYaw);
                 e.setPitch(scaffoldPitch);
@@ -422,8 +449,13 @@ public class Scaffold extends Module {
                     blockYaw = blockRotations[0];
                     scaffoldPitch = blockRotations[1];
                     yawOffset = blockYawOffset;
+                    // Clamp pitch: don't go below minPitch, but when intave bypass is active,
+                    // also cap at 72° to ensure server target block is the support block behind
                     if (scaffoldPitch < minPitch) {
                         scaffoldPitch = minPitch;
+                    }
+                    if (intaveBypass.isToggled() && scaffoldPitch > 72F) {
+                        scaffoldPitch = 72F;
                     }
                 } else {
                     scaffoldPitch = minPitch;
@@ -548,7 +580,11 @@ public class Scaffold extends Module {
                 }
                 else {
                     scaffoldYaw = clientYaw - hardcodedYaw();
-                    scaffoldPitch = 80F;
+                    scaffoldPitch = intaveBypass.isToggled() ? 72F : 80F;
+                }
+                // Cap pitch when intave bypass is active to ensure correct target block
+                if (intaveBypass.isToggled() && scaffoldPitch > 72F) {
+                    scaffoldPitch = 72F;
                 }
                 e.setYaw(scaffoldYaw);
                 e.setPitch(scaffoldPitch);
@@ -582,14 +618,6 @@ public class Scaffold extends Module {
             rotatingForward = false;
         }
 
-        if (intaveBypass.isToggled() && intaveTargetValidation.isToggled() && pendingPlacement != null && blockRotations != null) {
-            scaffoldYaw = blockRotations[0];
-            scaffoldPitch = blockRotations[1];
-            e.setYaw(scaffoldYaw);
-            e.setPitch(scaffoldPitch);
-            theYaw = scaffoldYaw;
-        }
-
         // Tower integration removed - Tower doesn't have isVerticalTowering, yaw, pitch fields
 
         // Movement fix is now handled via RotationEvent -> MoveFix.Silent
@@ -599,11 +627,67 @@ public class Scaffold extends Module {
         if (e.getPitch() > 89.9F) {
             e.setPitch(89.9F);
         }
+        
+        // Lock View: force client camera to match server rotation.
+        // This eliminates the need for MoveFix entirely, which solves Gate 1
+        // (motion consistency) by keeping the movement yaw stable at the server yaw.
+        // When client yaw == server yaw, getMovementYaw() returns the same value as
+        // rotationYaw, so no input remapping occurs and speed ratio stays exactly 1.0.
+        if (intaveBypass.isToggled() && intaveLockView.isToggled() && rotation.getInput() > 0) {
+            mc.thePlayer.rotationYaw = e.getYaw();
+            mc.thePlayer.rotationPitch = e.getPitch();
+            mc.thePlayer.prevRotationYaw = e.getYaw();
+            mc.thePlayer.prevRotationPitch = e.getPitch();
+        }
 
         if (rotationDelay > 0) --rotationDelay;
 
-        //Fake rotations
-        if (fakeRotation.getInput() > 0) {
+        // Smooth visual rotation for scaffold when Intave bypass is active and Lock View is OFF.
+        // When Lock View is ON, we want the camera to match the exact blockRotations (no
+        // interpolation), so that crosshair, raytrace and placement all line up perfectly
+        // for checks like Grim's RotationPlace / Simulation.
+        if (intaveBypass.isToggled() && rotation.getInput() > 0 && !intaveLockView.isToggled()) {
+            float targetYaw = e.getYaw();
+            float targetPitch = e.getPitch();
+
+            if (!hasLastVisualRotation) {
+                lastVisualYaw = targetYaw;
+                lastVisualPitch = targetPitch;
+                hasLastVisualRotation = true;
+            }
+
+            float maxDelta = 30.0F; // max degrees per tick
+            float yawDiff = MathHelper.wrapAngleTo180_float(targetYaw - lastVisualYaw);
+            if (yawDiff > maxDelta) yawDiff = maxDelta;
+            if (yawDiff < -maxDelta) yawDiff = -maxDelta;
+
+            float pitchDiff = targetPitch - lastVisualPitch;
+            if (pitchDiff > maxDelta) pitchDiff = maxDelta;
+            if (pitchDiff < -maxDelta) pitchDiff = -maxDelta;
+
+            float smoothYaw = lastVisualYaw + yawDiff;
+            float smoothPitch = lastVisualPitch + pitchDiff;
+
+            lastVisualYaw = smoothYaw;
+            lastVisualPitch = smoothPitch;
+
+            e.setYaw(smoothYaw);
+            e.setPitch(smoothPitch);
+
+            if (intaveLockView.isToggled()) {
+                mc.thePlayer.rotationYaw = smoothYaw;
+                mc.thePlayer.rotationPitch = smoothPitch;
+                mc.thePlayer.prevRotationYaw = smoothYaw;
+                mc.thePlayer.prevRotationPitch = smoothPitch;
+            }
+        }
+
+        // Update server rotations for raycast with FINAL yaw/pitch
+        RotationUtils.serverRotations[0] = e.getYaw();
+        RotationUtils.serverRotations[1] = e.getPitch();
+
+        //Fake rotations -- skip when Lock View is active (camera is already at scaffold angle)
+        if (fakeRotation.getInput() > 0 && !(intaveBypass.isToggled() && intaveLockView.isToggled())) {
             if (fakeRotation.getInput() == 1) {
                 fakeYaw = fakeYaw1;
                 if (blockRotations != null) {
@@ -632,10 +716,6 @@ public class Scaffold extends Module {
             }
             RotationUtils.setFakeRotations(fakeYaw, fakePitch);
         }
-
-        // Update server rotations after all adjustments
-        RotationUtils.serverRotations[0] = e.getYaw();
-        RotationUtils.serverRotations[1] = e.getPitch();
     }
     
     @SubscribeEvent
@@ -644,32 +724,25 @@ public class Scaffold extends Module {
             return;
         }
         
-        // Intave 12 bypass: Apply MoveFix to ensure movement matches server rotation
-        // MoveFix.Silent makes the engine automatically adjust movement inputs
-        // based on the difference between client view and server rotation
-        // This is the proper way to handle movement/rotation sync (from reference impl)
-        if (intaveBypass.isToggled() && intaveMovementFix.isToggled() && rotation.getInput() > 0) {
-            e.setMoveFix(RotationHandler.MoveFix.Silent);
+        if (intaveBypass.isToggled() && rotation.getInput() > 0) {
+            if (intaveLockView.isToggled()) {
+                // Lock View: client rotation already matches server rotation.
+                // No MoveFix needed -- movement inputs go directly through vanilla pipeline
+                // with the correct yaw, producing exact 1.0 speed ratio at terminal velocity.
+                e.setMoveFix(RotationHandler.MoveFix.None);
+            } else if (intaveMovementFix.isToggled()) {
+                int mode = (int) intaveMoveFixMode.getInput();
+                if (mode == 0) {
+                    e.setMoveFix(RotationHandler.MoveFix.Silent);
+                } else if (mode == 1) {
+                    e.setMoveFix(RotationHandler.MoveFix.Continuous);
+                } else {
+                    e.setMoveFix(RotationHandler.MoveFix.None);
+                }
+            }
         }
     }
-
-    @SubscribeEvent
-    public void onPostMotion(PostMotionEvent e) {
-        if (!Utils.nullCheck() || !isEnabled) {
-            return;
-        }
-        if (pendingPlacement == null) {
-            return;
-        }
-        if (pendingPlacementTick != mc.thePlayer.ticksExisted) {
-            clearPendingPlacement();
-            return;
-        }
-        PlaceData toPlace = pendingPlacement;
-        clearPendingPlacement();
-        place(toPlace);
-    }
-
+    
     @SubscribeEvent
     public void onSendPacket(SendPacketEvent e) {
         if (!Utils.nullCheck()) {
@@ -688,9 +761,16 @@ public class Scaffold extends Module {
                 return;
             }
             
-            // Intave Check 4 (line 145-153): isSuspicious(f) where f == 0.0 || f == 0.5 || f >= 1.0
-            // Intave Check 4 (line 154): f < 0.0 || f > 1.0 → FLAG
-            // Special case (line 90): If all three are 0.0, Intave allows it
+            // Skip air-click packets (position -1,-1,-1, direction 255)
+            // These should keep their original all-zero face values so Intave's
+            // early return at line 90 (f1 == 0 && f2 == 0 && f3 == 0) still triggers
+            if (packet.getPlacedBlockDirection() == 255) {
+                return;
+            }
+            
+            // Intave Check 3 (line 145-153): isSuspicious(f) where f == 0.0 || f == 0.5 || f >= 1.0
+            // Intave Check 3 (line 154): f < 0.0 || f > 1.0 → immediate FLAG
+            // Special case (line 90): If all three are 0.0, Intave allows it (early return)
             C08PacketPlayerBlockPlacementAccessor accessor = (C08PacketPlayerBlockPlacementAccessor) packet;
             
             float facingX = packet.getPlacedBlockOffsetX();
@@ -793,9 +873,6 @@ public class Scaffold extends Module {
         if (!isEnabled) {
             return;
         }
-        if (pendingPlacement != null && pendingPlacementTick != mc.thePlayer.ticksExisted) {
-            clearPendingPlacement();
-        }
         // LongJump.function removed - check isEnabled instead
         boolean longJumpEnabled = ModuleManager.longJump != null && ModuleManager.longJump.isEnabled();
         if (longJumpEnabled) {
@@ -890,7 +967,6 @@ public class Scaffold extends Module {
                 startYPos = -1;
                 lookVec = null;
                 lastPlacement = null;
-                clearPendingPlacement();
             }
         }
     }
@@ -950,19 +1026,13 @@ public class Scaffold extends Module {
     public boolean sprint() {
         if (isEnabled) {
             // Intave 12 bypass: Sprint control
-            // CelerityCheck (line 149-151): When placing block under within 380ms with negative Y velocity
-            // maxspeed is limited to 0.28, sprinting would exceed this
+            // Check 6 (line 240-247): Sprint + falling + non-adjacent target -> scaffoldwalkVL increase
+            // CelerityCheck (line 149-151): Block placed under within 380ms + falling -> maxspeed = 0.28
+            // The safest approach: completely disable sprint during normal scaffold
+            // Sprint is only allowed when using fast scaffold modes (Jump/Keep-Y/Float)
             if (intaveBypass.isToggled() && intaveSprintControl.isToggled()) {
-                boolean recentPlacement = (System.currentTimeMillis() - lastPlacementTime) < 380;
-                boolean isFalling = mc.thePlayer.motionY < 0.0;
-                
-                // Intave Check 6 (line 240-247): Sprinting + falling with target not adjacent → VL increase
-                if (recentPlacement && isFalling && mc.thePlayer.isSprinting()) {
-                    // Control sprint to avoid detection
-                    // Only allow sprint if we're using fast scaffold modes
-                    if (handleFastScaffolds() == 0) {
-                        return false; // Don't sprint when falling and recently placed
-                    }
+                if (handleFastScaffolds() == 0) {
+                    return false; // Don't sprint during normal scaffolding
                 }
             }
             
@@ -980,11 +1050,8 @@ public class Scaffold extends Module {
             return false;
         }
         
-        boolean recentPlacement = (System.currentTimeMillis() - lastPlacementTime) < 380;
-        boolean isFalling = mc.thePlayer.motionY < 0.0;
-        
-        // CelerityCheck integration: Limit speed during scaffold
-        return recentPlacement && isFalling && handleFastScaffolds() == 0;
+        // Disable sprint entirely during normal scaffold (no fast scaffold mode)
+        return handleFastScaffolds() == 0;
     }
 
     private int handleFastScaffolds() {
@@ -1028,7 +1095,6 @@ public class Scaffold extends Module {
         }
         
         long currentTime = System.currentTimeMillis();
-        boolean isJumping = mc.thePlayer.motionY > 0.0;
         boolean isFalling = mc.thePlayer.motionY < 0.0;
         
         // Intave 12 bypass: Timing with variance to avoid balance detection
@@ -1066,7 +1132,6 @@ public class Scaffold extends Module {
         // It sets lastTimeSuspiciousForScaffoldWalk, then FLAGS on 2nd occurrence within 2000ms
         // Solution: Use the raycast block as placement target when possible, or ensure hitVec is accurate
         if (intaveBypass.isToggled() && intaveTargetValidation.isToggled()) {
-            boolean invalidTarget = false;
             if (raycast != null && raycast.typeOfHit == MovingObjectPosition.MovingObjectType.BLOCK) {
                 // If our raycast hits the block we want to place against, use its hitVec
                 // This ensures server-side getTargetBlock() matches our placement
@@ -1087,44 +1152,24 @@ public class Scaffold extends Module {
                         BlockPos placePos = lookingAt.offset(raycast.sideHit);
                         
                         // Check if we can place at this position instead
-                        if (BlockUtils.replaceable(placePos) && !BlockUtils.replaceable(lookingAt) &&
-                                !BlockUtils.isInteractable(BlockUtils.getBlock(lookingAt))) {
+                        if (BlockUtils.replaceable(placePos) && !BlockUtils.replaceable(lookingAt)) {
                             // Use the block we're looking at - this prevents Check 5c
                             block.blockPos = lookingAt;
                             block.enumFacing = raycast.sideHit;
                             block.hitVec = raycast.hitVec;
-                        } else {
-                            invalidTarget = true;
                         }
                     }
                 }
             }
-            if (invalidTarget) {
-                return;
-            }
         }
         
-        // Check 6 (line 240-247): Sprinting + falling + target NOT adjacent to placed block
-        // Only skip if sprint control is enabled AND we're in a risky situation
+        // Check 6 (line 240-247): Sprint + falling + non-adjacent target -> scaffoldwalkVL
+        // Sprint is now fully controlled in sprint() method which disables it during
+        // normal scaffold. As a safety net, force-disable sprint during placement if
+        // intave bypass is active and we're falling.
         if (intaveBypass.isToggled() && intaveSprintControl.isToggled()) {
-            if (mc.thePlayer.isSprinting() && isFalling && !isJumping) {
-                if (raycast != null && raycast.typeOfHit == MovingObjectPosition.MovingObjectType.BLOCK) {
-                    BlockPos targetPos = raycast.getBlockPos();
-                    BlockPos placedPos = block.blockPos;
-                    
-                    // Check if target is adjacent (NORTH/EAST/SOUTH/WEST) to placed block
-                    boolean isAdjacent = targetPos.equals(placedPos) ||
-                                        targetPos.add(0, 0, -1).equals(placedPos) ||
-                                        targetPos.add(1, 0, 0).equals(placedPos) ||
-                                        targetPos.add(0, 0, 1).equals(placedPos) ||
-                                        targetPos.add(-1, 0, 0).equals(placedPos);
-                    
-                    // Also check if target is the block we're placing against
-                    if (!isAdjacent) {
-                        // Intave will increase scaffoldwalkVL - disable sprint temporarily
-                        mc.thePlayer.setSprinting(false);
-                    }
-                }
+            if (mc.thePlayer.isSprinting() && isFalling) {
+                mc.thePlayer.setSprinting(false);
             }
         }
         
@@ -1141,8 +1186,25 @@ public class Scaffold extends Module {
         placePitch = RotationUtils.serverRotations[1];
         
         // Execute placement
+        //
+        // Intave Check 7 (click ratio): Flags when clicks==1 per placement.
+        // Fix: Send a raw C08 to the PREVIOUS placement position BEFORE the real placement.
+        // Server processes in order:
+        //   C08(extra) -> InteractEvent(clicks=1). Placement fails (occupied). No BlockPlaceEvent.
+        //   C08(real)  -> InteractEvent(clicks=2). BlockPlaceEvent: clicks>=2 -> PASS.
+        
+        if (intaveBypass.isToggled() && intaveClickVariation.isToggled() && lastPlacedBlockPos != null) {
+            // Extra click to previous block (raw C08, goes through onSendPacket for face randomization)
+            float fX = 0.1f + (float)(Math.random() * 0.35);
+            float fY = 0.1f + (float)(Math.random() * 0.35);
+            float fZ = 0.1f + (float)(Math.random() * 0.35);
+            mc.thePlayer.sendQueue.addToSendQueue(new C08PacketPlayerBlockPlacement(
+                    lastPlacedBlockPos, lastPlacedExtraFacing.getIndex(), heldItem, fX, fY, fZ));
+        }
+        
+        // Main placement via vanilla onPlayerRightClick
         if (mc.playerController.onPlayerRightClick(mc.thePlayer, mc.theWorld, heldItem, block.blockPos, block.enumFacing, block.hitVec)) {
-            // Track timing for variance calculation
+            // Track timing
             if (lastPlacementTime > 0 && intaveBypass.isToggled() && intaveTimingVariance.isToggled()) {
                 long interval = currentTime - lastPlacementTime;
                 placementTimings[timingIndex] = interval;
@@ -1151,26 +1213,9 @@ public class Scaffold extends Module {
             }
             lastPlacementTime = currentTime;
             
-            // Intave 12 bypass: Click variation to break 1:1 click-to-place ratio
-            // MachineBlockCheck detects if clicks == 1 per placement (perfect efficiency)
-            // Intave tracks PlayerInteractEvent (right-clicks), not swings
-            // Humans typically spam right-click or occasionally miss, so we simulate extra interactions
-            if (intaveBypass.isToggled() && intaveClickVariation.isToggled()) {
-                extraClickCounter++;
-                
-                // Every 2-4 placements, send 1-2 extra right-click packets
-                int extraClickThreshold = 2 + intaveRandom.nextInt(3); // 2, 3, or 4
-                if (extraClickCounter >= extraClickThreshold) {
-                    extraClickCounter = 0;
-                    int extraClicks = 1 + intaveRandom.nextInt(2); // 1 or 2 extra
-                    
-                    for (int i = 0; i < extraClicks; i++) {
-                        // Send an extra block interact on the same target (RIGHT_CLICK_BLOCK)
-                        // This increments click counters without placing a new block.
-                        sendExtraBlockInteract(heldItem, block);
-                    }
-                }
-            }
+            // Save for next extra click
+            lastPlacedBlockPos = block.blockPos;
+            lastPlacedExtraFacing = block.enumFacing;
             
             if (silentSwing.isToggled()) {
                 mc.thePlayer.sendQueue.addToSendQueue(new C0APacketAnimation());
@@ -1209,63 +1254,20 @@ public class Scaffold extends Module {
         return totalBlocks;
     }
 
-    private boolean shouldDelayPlacementForIntave() {
-        return intaveBypass.isToggled();
-    }
-
-    private void queuePlacement(int yOffset, int xOffset) {
-        if (pendingPlacement != null) {
-            return;
-        }
-        locateBlocks(yOffset, xOffset);
-        if (blockInfo == null) {
-            return;
-        }
-        lastPlacement = blockInfo;
-        pendingPlacement = blockInfo;
-        pendingPlacementTick = mc.thePlayer.ticksExisted;
-        blockInfo = null;
-    }
-
-    private void clearPendingPlacement() {
-        pendingPlacement = null;
-        pendingPlacementTick = -1;
-    }
-
-    private void sendExtraBlockInteract(ItemStack heldItem, PlaceData block) {
-        if (block == null || block.blockPos == null || block.enumFacing == null) {
-            return;
-        }
-        Vec3 vec = block.hitVec != null
-                ? block.hitVec
-                : new Vec3(block.blockPos.getX() + 0.5, block.blockPos.getY() + 0.5, block.blockPos.getZ() + 0.5);
-        float hitX = (float) (vec.xCoord - block.blockPos.getX());
-        float hitY = (float) (vec.yCoord - block.blockPos.getY());
-        float hitZ = (float) (vec.zCoord - block.blockPos.getZ());
-        hitX = MathHelper.clamp_float(hitX, 0.0F, 1.0F);
-        hitY = MathHelper.clamp_float(hitY, 0.0F, 1.0F);
-        hitZ = MathHelper.clamp_float(hitZ, 0.0F, 1.0F);
-        if (intaveBypass.isToggled()) {
-            hitX = randomizeFacingValue(hitX);
-            hitY = randomizeFacingValue(hitY);
-            hitZ = randomizeFacingValue(hitZ);
-        }
-        mc.thePlayer.sendQueue.addToSendQueue(
-                new C08PacketPlayerBlockPlacement(block.blockPos, block.enumFacing.getIndex(), heldItem, hitX, hitY, hitZ)
-        );
-    }
-
     private void placeBlock(int yOffset, int xOffset) {
-        if (shouldDelayPlacementForIntave()) {
-            queuePlacement(yOffset, xOffset);
+        locateAndPlaceBlock(yOffset, xOffset);
+        
+        // Skip multi-place when intave bypass is active.
+        // Multi-place sends multiple placements per tick which is easily detectable.
+        // The vanilla right-click simulation only supports 1 placement per tick.
+        if (intaveBypass.isToggled() && intaveClickVariation.isToggled()) {
             return;
         }
-        locateAndPlaceBlock(yOffset, xOffset);
+        
         int input = (int) multiPlace.getInput();
         if (sprint.getInput() == 0 && mc.thePlayer.onGround && !ModuleManager.tower.canTower() && !usingFastScaffold()) {
             return;
         }
-        // ModuleManager.tower.tower removed - Tower doesn't have this field
         if (input >= 1) {
             locateAndPlaceBlock(yOffset, xOffset);
             if (input >= 2) {
@@ -1317,9 +1319,6 @@ public class Scaffold extends Module {
         int blockZ = blockInfo2.blockPos.getZ();
         EnumFacing blockFacing = lastPlacedFacing = blockInfo2.enumFacing;
         blockInfo = blockInfo2;
-        if (intaveBypass.isToggled() && intaveTargetValidation.isToggled()) {
-            targetBlock = new Vec3(blockX, blockY, blockZ);
-        }
 
         // Calculate hitVec - the randomization will be applied in onSendPacket via block face offsets
         // Keep hitVec calculation similar to reference for placement accuracy
@@ -1535,50 +1534,46 @@ public class Scaffold extends Module {
      */
     private long calculateVariedDelay(boolean safeMode) {
         // Base ranges for safe/aggressive modes
-        // Safe: 25-140ms range, Aggressive: 8-90ms range
-        long minBase = safeMode ? 25 : 8;
-        long maxBase = safeMode ? 140 : 90;
-        long spikeExtra = safeMode ? 80 : 50;
-        long maxClamp = maxBase + spikeExtra;
+        // Vanilla right-click hold = 250ms (timer=4, ~4 CPS). Target similar rates.
+        // Safe: 120-250ms (~4-8 CPS, avg ~5.4). With 1 extra click -> ~10.8 CPS total.
+        // Aggressive: 50-150ms (~7-20 CPS). With extra click -> higher.
+        long minBase = safeMode ? 120 : 50;
+        long maxBase = safeMode ? 250 : 150;
         
         // Use placement count to create a pattern with high variance
         // Every few placements, use a noticeably different delay
-        int pattern = placementCount % 6;
+        int pattern = placementCount % 5;
         
         long delay;
         switch (pattern) {
             case 0:
                 // Short delay
-                delay = minBase + intaveRandom.nextInt(12);
+                delay = minBase + intaveRandom.nextInt(10);
                 break;
             case 1:
                 // Medium-short delay
-                delay = minBase + 15 + intaveRandom.nextInt(25);
+                delay = minBase + 10 + intaveRandom.nextInt(15);
                 break;
             case 2:
-                // Medium delay
-                delay = (minBase + maxBase) / 2 + intaveRandom.nextInt(30) - 15;
+                // Long delay (creates high variance)
+                delay = maxBase - 20 + intaveRandom.nextInt(25);
                 break;
             case 3:
-                // Long delay (creates high variance)
-                delay = maxBase - 35 + intaveRandom.nextInt(30);
+                // Medium delay
+                delay = (minBase + maxBase) / 2 + intaveRandom.nextInt(20) - 10;
                 break;
             case 4:
-                // Occasional spike delay to increase balance variance
-                delay = maxBase + 10 + intaveRandom.nextInt((int) spikeExtra);
-                break;
-            case 5:
             default:
                 // Random in full range
                 delay = minBase + intaveRandom.nextInt((int)(maxBase - minBase));
                 break;
         }
         
-        // Add additional random jitter (±8ms) for extra unpredictability
-        delay += intaveRandom.nextInt(17) - 8;
+        // Add additional random jitter (±5ms) for extra unpredictability
+        delay += intaveRandom.nextInt(11) - 5;
         
         // Clamp to valid range
-        return Math.max(minBase, Math.min(maxClamp, delay));
+        return Math.max(minBase, Math.min(maxBase, delay));
     }
     
     public float hardcodedYaw() {

@@ -192,6 +192,12 @@ public final class RotationHandler extends Module {
                 case Strict:
                     movementYaw = getRotationYaw();
                     break;
+                case Continuous:
+                    // Set movementYaw for moveFlying to use, but do NOT modify inputs here.
+                    // The continuous rotation correction is applied in MixinEntity.moveFlying
+                    // using the PrePlayerInputEvent, preserving exact vector magnitude.
+                    movementYaw = getRotationYaw();
+                    break;
             }
         } else {
             movementYaw = null;
@@ -202,7 +208,19 @@ public final class RotationHandler extends Module {
     public enum MoveFix {
         None,
         Silent,
-        Strict;
+        Strict,
+        /**
+         * Continuous MoveFix: applies rotation correction using continuous floating-point math
+         * (no Math.round() discretization). This preserves the movement vector magnitude exactly,
+         * so the XZ speed ratio between ticks stays at 1.0 at terminal velocity -- avoiding
+         * Intave's Gate 1 motion consistency check.
+         * 
+         * Reference: FireBounce's applyStrafeToPlayer (Rotation.kt lines 91-139).
+         * 
+         * This mode is handled in MixinEntity.moveFlying, NOT in the input-level handler here,
+         * because it operates on the strafe/forward values BEFORE normalization in moveFlying.
+         */
+        Continuous;
 
         public static final String[] MODES = Arrays.stream(values()).map(Enum::name).toArray(String[]::new);
     }

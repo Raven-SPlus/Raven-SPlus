@@ -30,6 +30,8 @@ public class NoSlow extends Module {
                 .add(new NCPNoSlow("NCP", this))
                 .add(new IntaveNoSlow("Intave", this))
                 .add(new OldIntaveNoSlow("Old Intave", this))
+                .add(new Intave14NoSlow("Intave14", this))
+                .add(new IntaveBlinkNoSlow("Intave Blink", this))
                 .add(new OldGrimNoSlow("Old Grim", this))
                 .add(new GrimACNoSlow("GrimAC", this))
                 .add(new CustomNoSlow("Custom", this))

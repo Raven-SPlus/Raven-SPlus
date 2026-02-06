@@ -14,6 +14,7 @@ import keystrokesmod.module.impl.other.RotationHandler;
 import keystrokesmod.module.impl.other.SlotHandler;
 import keystrokesmod.module.impl.player.Blink;
 import keystrokesmod.module.impl.player.antivoid.HypixelAntiVoid;
+import keystrokesmod.module.impl.exploit.disabler.IntaveDisabler;
 import keystrokesmod.module.impl.world.AntiBot;
 import keystrokesmod.module.setting.Setting;
 import keystrokesmod.module.setting.impl.*;
@@ -711,6 +712,13 @@ public class KillAura extends IAutoClicker {
                     // Re-arm attack for next tick to spread LOOK -> ATTACK spacing
                     attack = true;
                     return;
+                }
+            }
+            // IntaveDisabler IntaveReach: notify for position spoof when attacking at range
+            if (ModuleManager.disabler != null && ModuleManager.disabler.isEnabled()) {
+                Object sel = ModuleManager.disabler.mode.getSelected();
+                if (sel instanceof IntaveDisabler) {
+                    ((IntaveDisabler) sel).onKillAuraAttack(target);
                 }
             }
             Utils.attackEntity(target, swingWhileBlocking);

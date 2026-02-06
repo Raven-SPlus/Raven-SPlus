@@ -233,6 +233,7 @@ public class ModuleManager {
         this.addModule(autoHeal = new AutoHeal());
         this.addModule(new AutoJump());
         this.addModule(new AutoPot());
+        this.addModule(new FastUse());
         this.addModule(new AutoSwap());
         this.addModule(backtrack = new Backtrack());
         this.addModule(blink = new Blink());
