@@ -3,8 +3,6 @@ package keystrokesmod.utility.font.impl;
 import keystrokesmod.utility.font.CenterMode;
 import keystrokesmod.utility.font.IFont;
 import keystrokesmod.utility.render.ColorUtils;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.ScaledResolution;
 import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 
@@ -20,6 +18,8 @@ import java.util.List;
  * @since 28/07/2024
  */
 public class FontRenderer extends CharRenderer implements IFont {
+    private static final double RENDER_SCALE = 0.5D;
+    private static final double ATLAS_SCALE = 1.0D / RENDER_SCALE;
 
     final CharData[] boldChars = new CharData[256];
     final CharData[] italicChars = new CharData[256];
@@ -64,8 +64,6 @@ public class FontRenderer extends CharRenderer implements IFont {
     }
 
     public void drawString(String text, double x, double y, int color, boolean shadow) {
-        ScaledResolution sr = new ScaledResolution(Minecraft.getMinecraft());
-
         if (text == null) {
             return;
         }
@@ -78,10 +76,10 @@ public class FontRenderer extends CharRenderer implements IFont {
 
         CharData[] currentData = this.charData;
         double alpha = (color >> 24 & 255) / 255f;
-        x = (x - 1) * sr.getScaleFactor();
-        y = (y - 3) * sr.getScaleFactor() - 0.2;
+        x = (x - 1) * ATLAS_SCALE;
+        y = (y - 3.2) * ATLAS_SCALE;
         GL11.glPushMatrix();
-        GL11.glScaled((double) 1 / sr.getScaleFactor(), 1 / (double) sr.getScaleFactor(), 1 / (double) sr.getScaleFactor());
+        GL11.glScaled(RENDER_SCALE, RENDER_SCALE, 1.0D);
         GlStateManager.enableBlend();
         GlStateManager.blendFunc(770, 771);
         ColorUtils.setColor(color);
@@ -162,8 +160,6 @@ public class FontRenderer extends CharRenderer implements IFont {
     }
 
     public double getStringWidth(String text) {
-        ScaledResolution sr = new ScaledResolution(Minecraft.getMinecraft());
-
         if (text == null) {
             return 0;
         }
@@ -181,13 +177,11 @@ public class FontRenderer extends CharRenderer implements IFont {
             }
         }
 
-        return width / (double) sr.getScaleFactor();
+        return width * RENDER_SCALE;
     }
 
     public double getHeight() {
-        ScaledResolution sr = new ScaledResolution(Minecraft.getMinecraft());
-
-        return (this.fontHeight - 8) / (double) sr.getScaleFactor();
+        return (this.fontHeight - 8) * RENDER_SCALE;
     }
 
     @Override

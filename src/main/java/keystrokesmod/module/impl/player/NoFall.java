@@ -21,6 +21,8 @@ public class NoFall extends Module {
                 .add(new OnGround2NoFall("OnGround2", this))
                 .add(new VulcanNoFall("Vulcan", this))
                 .add(new HypixelNoGroundNoFall("HypixelNoGround", this))
+                .add(new MatrixNoFall("Matrix", this))
+                .add(new MatrixSpoofNoFall("MatrixSpoof", this))
         );
         this.registerSetting(ignoreVoid = new ButtonSetting("Ignore void", true));
     }

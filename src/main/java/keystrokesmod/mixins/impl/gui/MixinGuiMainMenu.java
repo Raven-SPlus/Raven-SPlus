@@ -57,9 +57,9 @@ public abstract class MixinGuiMainMenu extends GuiScreen {
     /**
      * Vanilla (non-themed) main menu path: draw a one-shot fade overlay at the end of rendering.
      */
-    @Inject(method = "drawScreen", at = @At("TAIL"))
+    @Inject(method = "drawScreen", at = @At("RETURN"))
     public void raven_APlus$onDrawScreenTail(int mouseX, int mouseY, float partialTicks, CallbackInfo ci) {
-        // If the themed path is enabled, the HEAD injection cancels and TAIL won't run.
+        // If the themed path is enabled, the HEAD injection cancels and this RETURN hook won't run.
         // So this only covers vanilla rendering.
         raven_APlus$drawStartupFadeOverlay();
     }

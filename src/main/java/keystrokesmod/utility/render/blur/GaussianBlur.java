@@ -1,36 +1,14 @@
 package keystrokesmod.utility.render.blur;
 
 import keystrokesmod.utility.render.ColorUtils;
-import keystrokesmod.utility.render.RenderUtils;
 import net.minecraft.client.renderer.GlStateManager;
-import net.minecraft.client.shader.Framebuffer;
 import org.jetbrains.annotations.Range;
-import java.nio.FloatBuffer;
 
 import static keystrokesmod.Raven.mc;
 import static keystrokesmod.utility.render.blur.StencilUtil.checkSetupFBO;
 import static org.lwjgl.opengl.GL11.*;
-import static org.lwjgl.opengl.GL20.glUniform1;
 
-/**
- * @author cedo
- * @since 05/13/2022
- */
 public class GaussianBlur {
-
-    private static final ShaderUtil gaussianBlur = new ShaderUtil("keystrokesmod:shaders/gaussian.frag");
-
-    private static Framebuffer framebuffer = new Framebuffer(1, 1, false);
-
-    private static void setupUniforms(float dir1, float dir2, @Range(from = 0, to = 64) int radius) {
-        gaussianBlur.setUniformi("textureIn", 0);
-        gaussianBlur.setUniformf("texelSize", 1.0F / (float) mc.displayWidth, 1.0F / (float) mc.displayHeight);
-        gaussianBlur.setUniformf("direction", dir1, dir2);
-        gaussianBlur.setUniformf("radius", radius);
-
-        FloatBuffer weightBuffer = BlurKernelCache.getWeights(radius);
-        glUniform1(gaussianBlur.getUniform("weights"), weightBuffer);
-    }
 
     public static void startBlur(){
         mc.mcProfiler.startSection("Pre-blur");
@@ -49,7 +27,6 @@ public class GaussianBlur {
         mc.mcProfiler.startSection("Post-blur");
         StencilUtil.readStencilBuffer(1);
 
-        // Short-circuit when blur has no visible effect
         if (radius <= 0 || compression <= 0) {
             StencilUtil.uninitStencilBuffer();
             ColorUtils.resetColor();
@@ -58,29 +35,15 @@ public class GaussianBlur {
             return;
         }
 
-        framebuffer = RenderUtils.createFrameBuffer(framebuffer);
+        int iterations = (int) Math.max(1, radius / 4f);
+        int offset = (int) compression;
 
-        framebuffer.framebufferClear();
-        framebuffer.bindFramebuffer(false);
-        gaussianBlur.init();
-        setupUniforms(compression, 0, radius);
-
-        RenderUtils.bindTexture(mc.getFramebuffer().framebufferTexture);
-        ShaderUtil.drawQuads();
-        framebuffer.unbindFramebuffer();
-        gaussianBlur.unload();
-
-        mc.getFramebuffer().bindFramebuffer(false);
-        gaussianBlur.init();
-        setupUniforms(0, compression, radius);
-
-        RenderUtils.bindTexture(framebuffer.framebufferTexture);
-        ShaderUtil.drawQuads();
-        gaussianBlur.unload();
+        KawaseBlur.renderBlur(mc.getFramebuffer().framebufferTexture, iterations, offset);
 
         StencilUtil.uninitStencilBuffer();
         ColorUtils.resetColor();
         GlStateManager.bindTexture(0);
+
         mc.mcProfiler.endSection();
     }
 

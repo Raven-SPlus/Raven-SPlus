@@ -28,6 +28,10 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class Indicators extends Module {
+    private static final ItemStack ENDER_PEARL_ITEM = new ItemStack(Items.ender_pearl);
+    private static final ItemStack ARROW_ITEM = new ItemStack(Items.arrow);
+    private static final ItemStack FIRE_CHARGE_ITEM = new ItemStack(Items.fire_charge);
+    
     private ButtonSetting renderArrows;
     private ButtonSetting renderPearls;
     private ButtonSetting renderFireballs;
@@ -74,7 +78,7 @@ public class Indicators extends Module {
             Iterator<Entity> iterator = threats.iterator();
             while (iterator.hasNext()) {
                 Entity e = iterator.next();
-                if (e == null || !mc.theWorld.loadedEntityList.contains(e) || !canRender(e) || (e instanceof EntityArrow && Reflection.inGround.getBoolean(e))) {
+                if (e == null || e.isDead || !canRender(e) || (e instanceof EntityArrow && Reflection.inGround.getBoolean(e))) {
                     iterator.remove();
                     continue;
                 }
@@ -90,12 +94,12 @@ public class Indicators extends Module {
                     ItemStack entityItem = null;
                     if (e instanceof EntityEnderPearl) {
                         color = pearlColor;
-                        entityItem = new ItemStack(Items.ender_pearl);
+                        entityItem = ENDER_PEARL_ITEM;
                     } else if (e instanceof EntityArrow) {
-                        entityItem = new ItemStack(Items.arrow);
+                        entityItem = ARROW_ITEM;
                     } else if (e instanceof EntityFireball) {
                         color = fireBallColor;
-                        entityItem = new ItemStack(Items.fire_charge);
+                        entityItem = FIRE_CHARGE_ITEM;
                     }
                     if (entityItem != null) {
                         GL11.glPushMatrix();

@@ -156,6 +156,9 @@ public class MainMenuShaderRenderer {
                 case 3: // Aurora
                     shaderPath = "keystrokesmod:shaders/main_menu_background_aurora.frag";
                     break;
+                case 4: // Astral
+                    shaderPath = "keystrokesmod:shaders/main_menu_background_astral.frag";
+                    break;
                 default:
                     shaderPath = "keystrokesmod:shaders/main_menu_background_rise.frag";
                     break;
@@ -343,6 +346,9 @@ public class MainMenuShaderRenderer {
                     break;
                 case 3: // Aurora
                     shaderPath = "keystrokesmod:shaders/main_menu_background_aurora.frag";
+                    break;
+                case 4: // Astral
+                    shaderPath = "keystrokesmod:shaders/main_menu_background_astral.frag";
                     break;
                 default:
                     shaderPath = "keystrokesmod:shaders/main_menu_background_rise.frag";

@@ -9,7 +9,7 @@ import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
 
 public class CharRenderer {
-    final float imgSize = 1024;
+    final float imgSize = 2048;
     final CharData[] charData = new CharData[256];
     final int charOffset = 0;
     Font font;

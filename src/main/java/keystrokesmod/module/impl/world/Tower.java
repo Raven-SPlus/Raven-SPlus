@@ -55,6 +55,7 @@ public class Tower extends Module {
             public void onUpdate(TickEvent.ClientTickEvent event) {
                 // Early return if no modules that use tower are enabled
                 if (!scaffold.isEnabled() && !ModuleManager.safeWalk.isEnabled()) {
+                    lastTowering = false;
                     return;
                 }
                 final boolean curCanTower = canTower();

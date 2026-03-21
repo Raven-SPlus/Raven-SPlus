@@ -48,7 +48,7 @@ public class Settings extends Module {
         this.registerSetting(timeMultiplier = new SliderSetting("Time multiplier", 0.5, 0.1, 4.0, 0.1));
         this.registerSetting(toggleSound = new ModeSetting("Toggle sound", new String[]{"None", "Rise", "Sigma", "QuickMacro"}, 1));
         this.registerSetting(new DescriptionSetting("Client background"));
-        this.registerSetting(backgroundMode = new ModeSetting("Custom client background", new String[]{"Flow", "Rise", "Nexus", "Aurora"}, 3));
+        this.registerSetting(backgroundMode = new ModeSetting("Custom client background", new String[]{"Flow", "Rise", "Nexus", "Aurora", "Astral"}, 3));
         
         // Target filter settings
         this.registerSetting(new DescriptionSetting("Target Filter"));

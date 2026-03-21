@@ -155,16 +155,19 @@ public class BlockUtils {
     }
 
     public static @NotNull List<BlockPos> getAllInBox(@NotNull BlockPos from, @NotNull BlockPos to) {
-        final List<BlockPos> blocks = new ArrayList<>();
+        final int minX = Math.min(from.getX(), to.getX());
+        final int minY = Math.min(from.getY(), to.getY());
+        final int minZ = Math.min(from.getZ(), to.getZ());
+        final int maxX = Math.max(from.getX(), to.getX());
+        final int maxY = Math.max(from.getY(), to.getY());
+        final int maxZ = Math.max(from.getZ(), to.getZ());
+        
+        final int estimatedSize = (maxX - minX + 1) * (maxY - minY + 1) * (maxZ - minZ + 1);
+        final List<BlockPos> blocks = new ArrayList<>(estimatedSize);
 
-        BlockPos min = new BlockPos(Math.min(from.getX(), to.getX()),
-                Math.min(from.getY(), to.getY()), Math.min(from.getZ(), to.getZ()));
-        BlockPos max = new BlockPos(Math.max(from.getX(), to.getX()),
-                Math.max(from.getY(), to.getY()), Math.max(from.getZ(), to.getZ()));
-
-        for (int x = min.getX(); x <= max.getX(); x++)
-            for (int y = min.getY(); y <= max.getY(); y++)
-                for (int z = min.getZ(); z <= max.getZ(); z++)
+        for (int x = minX; x <= maxX; x++)
+            for (int y = minY; y <= maxY; y++)
+                for (int z = minZ; z <= maxZ; z++)
                     blocks.add(new BlockPos(x, y, z));
 
         return blocks;

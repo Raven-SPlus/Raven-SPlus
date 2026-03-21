@@ -181,9 +181,11 @@ public class KillAuraRotation {
             return getRotationsGrim(target);
         } else if (algo == 4) {
             return getRotationsGeneralAdaptive(target);
+        } else if (algo == 5) {
+            return getRotationsAdvanced(target);
         }
         return getRotationsClassic(target);
-        }
+    }
         
     /**
      * Classic rotation algorithm (V1).
@@ -616,6 +618,11 @@ public class KillAuraRotation {
         // Stop jitter when very close
         if (Math.abs(yawDiff) < stopThreshold) quantizedYaw = 0f;
         if (Math.abs(pitchDiff) < stopThreshold) quantizedPitch = 0f;
+        
+        // MX Invalid Pitch bypass: Sanitize tiny pitch deltas
+        if (Math.abs(quantizedPitch) < 1e-4f && Math.abs(quantizedPitch) > 0) {
+            quantizedPitch = 0f;
+        }
 
         rotations[0] = MathHelper.wrapAngleTo180_float(currentYaw + quantizedYaw);
         rotations[1] = MathHelper.clamp_float(currentPitch + quantizedPitch, -90f, 90f);
@@ -741,6 +748,11 @@ public class KillAuraRotation {
         Pair<Float, Float> entropySteps = applyEntropyBypass(stepYaw, stepPitch, gcd, maxYawStep, maxPitchStep, allowJitter);
         stepYaw = entropySteps.first();
         stepPitch = entropySteps.second();
+        
+        // MX Invalid Pitch bypass: Sanitize tiny pitch deltas
+        if (Math.abs(stepPitch) < 1e-4f && Math.abs(stepPitch) > 0) {
+            stepPitch = 0f;
+        }
 
         float newYaw = MathHelper.wrapAngleTo180_float(rotations[0] + stepYaw);
         float newPitch = MathHelper.clamp_float(rotations[1] + stepPitch, -90f, 90f);
@@ -752,6 +764,394 @@ public class KillAuraRotation {
         rotations = fixed;
         lastUpdateMs = System.currentTimeMillis();
         return rotations;
+    }
+    
+    /**
+     * Advanced rotation algorithm with comprehensive anti-detection features.
+     * Designed to bypass MX (AimComplex, AimAnalysis, AimStatistics, AimConstant, AimFactor, AimSmooth)
+     * and Intave (Heuristics, KillAuraCheck) detections.
+     */
+    private float[] getRotationsAdvanced(EntityLivingBase target) {
+        boolean hasTarget = target != null && !target.isDead;
+        boolean allowJitter = shouldAllowJitter(target);
+        aimSimulator.setJitterAllowed(allowJitter);
+        rotationEnhancer.setJitterAllowed(allowJitter);
+        
+        // === Aim Point Selection ===
+        int aimPointMode = parent.advAimPointMode != null ? (int) parent.advAimPointMode.getInput() : 4;
+        float aimOffset = parent.advAimOffset != null ? (float) parent.advAimOffset.getInput() : 0.0f;
+        
+        // Configure AimSimulator based on aim point mode
+        boolean useNearest = (aimPointMode == 3 || aimPointMode == 4); // Nearest or Adaptive
+        aimSimulator.setNearest(useNearest, 1.0);
+        aimSimulator.setLazy(false, 1.0);
+        
+        // === Noise Configuration ===
+        boolean enableNoise = parent.advNoise != null && parent.advNoise.isToggled();
+        if (!allowJitter) enableNoise = false;
+        
+        float horizontalNoise = parent.advNoiseH != null ? (float) parent.advNoiseH.getInput() : 0.4f;
+        float verticalNoise = parent.advNoiseV != null ? (float) parent.advNoiseV.getInput() : 0.3f;
+        float noiseSpeed = parent.advNoiseSpeed != null ? (float) parent.advNoiseSpeed.getInput() : 0.5f;
+        
+        // Range-based noise reduction
+        if (enableNoise && hasTarget) {
+            double distance = mc.thePlayer.getDistanceToEntity(target);
+            if (distance < 2.5) {
+                float scale = (float) (distance / 2.5);
+                horizontalNoise *= scale;
+                verticalNoise *= scale;
+            }
+        }
+        
+        aimSimulator.setNoise(enableNoise, new Pair<>(horizontalNoise, verticalNoise), noiseSpeed, 80);
+        aimSimulator.setPointRandomizationMode(allowJitter ? 3 : 0); // Smooth mode
+        aimSimulator.setDelay(false, 0);
+        
+        // === Get Target Rotation ===
+        float targetYaw;
+        float targetPitch;
+        
+        if (hasTarget) {
+            // Select aim point based on mode
+            Pair<Float, Float> baseRotation = getAdvancedAimPoint(target, aimPointMode, aimOffset);
+            targetYaw = baseRotation.first();
+            targetPitch = baseRotation.second();
+            
+            // === Prediction ===
+            if (parent.advPrediction != null && parent.advPrediction.isToggled()) {
+                float predictionStrength = parent.advPredictionStrength != null ? (float) parent.advPredictionStrength.getInput() : 0.5f;
+                int predictionMode = parent.advPredictionMode != null ? (int) parent.advPredictionMode.getInput() : 0;
+                
+                // Calculate target velocity
+                double velX = target.posX - target.lastTickPosX;
+                double velZ = target.posZ - target.lastTickPosZ;
+                double velY = target.posY - target.lastTickPosY;
+                
+                // Apply prediction based on mode
+                double predictX = target.posX + velX * predictionStrength * 3.0;
+                double predictZ = target.posZ + velZ * predictionStrength * 3.0;
+                double predictY = target.posY + velY * predictionStrength * 2.0;
+                
+                if (predictionMode == 1) { // Cubic
+                    predictX += velX * velX * predictionStrength;
+                    predictZ += velZ * velZ * predictionStrength;
+                } else if (predictionMode == 2) { // Exponential
+                    double speedSq = velX * velX + velZ * velZ;
+                    predictX += velX * speedSq * predictionStrength * 0.5;
+                    predictZ += velZ * speedSq * predictionStrength * 0.5;
+                }
+                
+                // Recalculate rotation to predicted position
+                Vec3 eye = Utils.getEyePos();
+                double diffX = predictX - eye.x();
+                double diffZ = predictZ - eye.z();
+                double diffY = (predictY + target.getEyeHeight() * 0.6) - eye.y();
+                double dist = Math.sqrt(diffX * diffX + diffZ * diffZ);
+                
+                float predictedYaw = (float) Math.toDegrees(Math.atan2(diffZ, diffX)) - 90.0f;
+                float predictedPitch = (float) -Math.toDegrees(Math.atan2(diffY, dist));
+                
+                // Blend prediction with base rotation
+                float blend = predictionStrength * 0.6f;
+                targetYaw = targetYaw + RotationUtils.normalize(predictedYaw - targetYaw) * blend;
+                targetPitch = targetPitch + (predictedPitch - targetPitch) * blend * 0.7f;
+            }
+            
+            actualTargetYaw = targetYaw;
+            actualTargetPitch = targetPitch;
+            hasValidTarget = true;
+            lastValidTargetYaw = targetYaw;
+            lastValidTargetPitch = targetPitch;
+        } else if (hasValidTarget) {
+            targetYaw = lastValidTargetYaw;
+            targetPitch = lastValidTargetPitch;
+        } else {
+            targetYaw = RotationHandler.getRotationYaw();
+            targetPitch = RotationHandler.getRotationPitch();
+        }
+        
+        // === Smoothing & Acceleration ===
+        float smoothingBase = parent.advSmoothingBase != null ? (float) parent.advSmoothingBase.getInput() : 0.4f;
+        float smoothingVar = parent.advSmoothingVar != null ? (float) parent.advSmoothingVar.getInput() : 0.15f;
+        float acceleration = parent.advAcceleration != null ? (float) parent.advAcceleration.getInput() : 0.3f;
+        float yawPitchRatio = parent.advYawPitchRatio != null ? (float) parent.advYawPitchRatio.getInput() : 1.2f;
+        
+        // Adaptive smoothing with variance for anti-pattern
+        float effectiveSmoothing = smoothingBase + (float) (Math.random() - 0.5) * smoothingVar * 2;
+        effectiveSmoothing = Math.max(0.1f, Math.min(1.0f, effectiveSmoothing));
+        
+        float yawDiff = RotationUtils.normalize(targetYaw - rotations[0]);
+        float pitchDiff = targetPitch - rotations[1];
+        
+        // Apply yaw/pitch ratio (makes movement more human-like)
+        float yawSpeed = 5.0f + (float) (Math.random() * 2.0);
+        float pitchSpeed = yawSpeed / yawPitchRatio;
+        
+        // Combat awareness - faster when far, more precise when close
+        if (parent.advCombatAwareness != null && parent.advCombatAwareness.isToggled() && hasTarget) {
+            double distance = mc.thePlayer.getDistanceToEntity(target);
+            float combatMult = distance < 2.0 ? 0.6f : (distance < 4.0 ? 0.85f : 1.0f);
+            yawSpeed *= combatMult;
+            pitchSpeed *= combatMult;
+        }
+        
+        // === GCD & Sensitivity Simulation ===
+        int gcdMode = parent.advGcdMode != null ? (int) parent.advGcdMode.getInput() : 3;
+        float gcd = getMouseGCD();
+        
+        if (gcdMode >= 1) { // Basic or higher
+            float gcdVariance = 0f;
+            if (gcdMode >= 2 && parent.advGcdVariance != null) { // Dynamic or Adaptive
+                gcdVariance = (float) parent.advGcdVariance.getInput();
+            }
+            
+            if (parent.advSensitivitySim != null && parent.advSensitivitySim.isToggled()) {
+                // Simulate different sensitivity
+                float simSens = parent.advSensitivity != null ? (float) parent.advSensitivity.getInput() / 100.0f : 1.0f;
+                float sensModifier = simSens * 0.6f + 0.2f;
+                gcd = sensModifier * sensModifier * sensModifier * 1.2f;
+            }
+            
+            // Apply variance for adaptive mode
+            if (gcdMode == 3 && gcdVariance > 0) { // Adaptive
+                gcd *= (1.0f + (float) (Math.random() - 0.5) * gcdVariance * 2);
+            }
+        }
+        
+        // Calculate step sizes
+        float maxYawStep = 7.0f;
+        float maxPitchStep = 4.5f;
+        
+        float stepYaw = MathHelper.clamp_float(yawDiff * effectiveSmoothing, -maxYawStep, maxYawStep);
+        float stepPitch = MathHelper.clamp_float(pitchDiff * effectiveSmoothing / yawPitchRatio, -maxPitchStep, maxPitchStep);
+        
+        // === Anti-Detection Bypasses ===
+        
+        // Entropy Bypass (MX AimComplexCheck)
+        if (parent.advEntropyBypass != null && parent.advEntropyBypass.isToggled() && allowJitter) {
+            float entropyVar = parent.advEntropyVariance != null ? (float) parent.advEntropyVariance.getInput() : 0.12f;
+            Pair<Float, Float> entropySteps = applyAdvancedEntropyBypass(stepYaw, stepPitch, gcd, maxYawStep, maxPitchStep, entropyVar);
+            stepYaw = entropySteps.first();
+            stepPitch = entropySteps.second();
+        }
+        
+        // Strafe Desync (Intave Heuristics pattern 51)
+        if (parent.advStrafeDesync != null && parent.advStrafeDesync.isToggled() && allowJitter) {
+            float desyncChance = parent.advStrafeDesyncChance != null ? (float) parent.advStrafeDesyncChance.getInput() : 30f;
+            boolean isStrafing = Math.abs(mc.thePlayer.moveStrafing) > 0.1f;
+            if (isStrafing && Math.random() * 100 < desyncChance) {
+                // Desync rotation from strafe direction
+                float strafeOffset = (float) (Math.random() - 0.5) * gcd * 3;
+                stepYaw += strafeOffset;
+            }
+        }
+        
+        // Factor Bypass (MX AimFactorCheck - small-big-small patterns)
+        if (parent.advFactorBypass != null && parent.advFactorBypass.isToggled() && allowJitter) {
+            // Prevent small-big-small patterns
+            float absStep = Math.abs(stepYaw);
+            float absLastStep = Math.abs(entropyLastYawStep);
+            if (absStep > absLastStep * 3.5f && absLastStep < 1.5f && absStep > 5.0f) {
+                // Spread the large step across ticks
+                stepYaw = Math.copySign(Math.min(absStep, absLastStep * 2.5f + 1.5f), stepYaw);
+            }
+        }
+        
+        // Constant Bypass (MX AimConstantCheck)
+        if (parent.advConstantBypass != null && parent.advConstantBypass.isToggled()) {
+            Pair<Float, Float> constantSteps = applyConstantBypass(stepYaw, stepPitch, gcd, maxYawStep, maxPitchStep);
+            stepYaw = constantSteps.first();
+            stepPitch = constantSteps.second();
+        }
+        
+        // Smooth Bypass (MX AimSmoothCheck - consecutive zero jiffs)
+        if (parent.advSmoothBypass != null && parent.advSmoothBypass.isToggled() && allowJitter) {
+            // Ensure we don't have consecutive identical steps
+            if (Math.abs(stepYaw - entropyLastYawStep) < gcd * 0.5f && Math.abs(stepYaw) > 0.1f) {
+                stepYaw += (Math.random() > 0.5 ? gcd : -gcd);
+            }
+            if (Math.abs(stepPitch - entropyLastPitchStep) < gcd * 0.5f && Math.abs(stepPitch) > 0.1f) {
+                stepPitch += (Math.random() > 0.5 ? gcd * 0.7f : -gcd * 0.7f);
+            }
+        }
+        
+        // Pattern Diversity (MX AimAnalysisCheck - linear patterns)
+        if (parent.advPatternDiversity != null && parent.advPatternDiversity.isToggled() && allowJitter) {
+            // Add controlled variance to break linear patterns
+            if (entropyTick % 5 == 0) {
+                float diversityNoise = (float) (Math.random() - 0.5) * gcd * 2;
+                stepYaw += diversityNoise;
+            }
+            if (entropyTick % 7 == 0) {
+                float diversityNoise = (float) (Math.random() - 0.5) * gcd * 1.5f;
+                stepPitch += diversityNoise;
+            }
+        }
+        
+        // Micro-correction (fine-tune when close to target)
+        if (parent.advMicroCorrection != null && parent.advMicroCorrection.isToggled() && hasTarget) {
+            float correctionStr = parent.advMicroCorrectionStr != null ? (float) parent.advMicroCorrectionStr.getInput() : 0.3f;
+            float totalDist = (float) Math.sqrt(yawDiff * yawDiff + pitchDiff * pitchDiff);
+            if (totalDist < 3.0f && totalDist > 0.3f) {
+                // Apply micro-correction for precision
+                stepYaw += yawDiff * correctionStr * 0.15f;
+                stepPitch += pitchDiff * correctionStr * 0.1f;
+            }
+        }
+        
+        // Overshoot
+        if (parent.advOvershoot != null && parent.advOvershoot.isToggled() && allowJitter && hasTarget) {
+            float overshootAmount = parent.advOvershootAmount != null ? (float) parent.advOvershootAmount.getInput() : 0.1f;
+            if (!isOvershooting && Math.random() < 0.08 && Math.abs(yawDiff) > 2.0f) {
+                isOvershooting = true;
+                overshootTicks = 0;
+            }
+            if (isOvershooting) {
+                stepYaw *= (1.0f + overshootAmount);
+                overshootTicks++;
+                if (overshootTicks > 3) {
+                    isOvershooting = false;
+                }
+            }
+        }
+        
+        // Quantize to GCD
+        if (gcdMode >= 1) {
+            stepYaw = Math.round(stepYaw / gcd) * gcd;
+            stepPitch = Math.round(stepPitch / gcd) * gcd;
+        }
+        
+        // Modulo Bypass (avoid 360 edge)
+        if (parent.advModuloBypass != null && parent.advModuloBypass.isToggled()) {
+            float newYaw = rotations[0] + stepYaw;
+            if (Math.abs(newYaw) > 270f && parent.rotationMode != null && parent.rotationMode.getInput() == 1) {
+                float offset = 720f;
+                float sign = newYaw == 0 ? 1f : Math.signum(newYaw);
+                newYaw += sign * offset;
+                stepYaw = newYaw - rotations[0];
+            }
+        }
+        
+        // === Apply Rotation ===
+        // MX Invalid Pitch bypass: Sanitize tiny pitch deltas before applying
+        // MX flags values like -3.8146973E-6 as "Invalid Pitch"
+        if (Math.abs(stepPitch) < 1e-4f && Math.abs(stepPitch) > 0) {
+            stepPitch = 0f; // Snap to zero to avoid denormal values
+        }
+        
+        float newYaw = MathHelper.wrapAngleTo180_float(rotations[0] + stepYaw);
+        float newPitch = MathHelper.clamp_float(rotations[1] + stepPitch, -90f, 90f);
+        
+        float prevYaw = rotations[0];
+        float prevPitch = rotations[1];
+        float[] fixed = RotationUtils.fixRotation(newYaw, newPitch, prevYaw, prevPitch);
+        fixed = finalizeRotations(fixed, prevYaw, prevPitch, hasTarget, allowJitter);
+        
+        // Update state
+        entropyLastYawStep = stepYaw;
+        entropyLastPitchStep = stepPitch;
+        entropyTick++;
+        
+        rotations = fixed;
+        lastUpdateMs = System.currentTimeMillis();
+        return rotations;
+    }
+    
+    /**
+     * Get aim point based on Advanced mode settings.
+     */
+    private Pair<Float, Float> getAdvancedAimPoint(EntityLivingBase target, int mode, float offset) {
+        Vec3 eye = Utils.getEyePos();
+        AxisAlignedBB box = target.getEntityBoundingBox();
+        
+        double targetX, targetY, targetZ;
+        
+        switch (mode) {
+            case 0: // Center
+                targetX = (box.minX + box.maxX) / 2;
+                targetY = (box.minY + box.maxY) / 2;
+                targetZ = (box.minZ + box.maxZ) / 2;
+                break;
+            case 1: // Eyes
+                targetX = target.posX;
+                targetY = target.posY + target.getEyeHeight();
+                targetZ = target.posZ;
+                break;
+            case 2: // Feet
+                targetX = target.posX;
+                targetY = target.posY + 0.2;
+                targetZ = target.posZ;
+                break;
+            case 3: // Nearest
+            case 4: // Adaptive
+            default:
+                // Find nearest point in bounding box
+                targetX = MathHelper.clamp_double(eye.x(), box.minX, box.maxX);
+                targetY = MathHelper.clamp_double(eye.y(), box.minY, box.maxY);
+                targetZ = MathHelper.clamp_double(eye.z(), box.minZ, box.maxZ);
+                
+                // For adaptive, blend between nearest and upper body based on distance
+                if (mode == 4) {
+                    double distance = mc.thePlayer.getDistanceToEntity(target);
+                    float upperBodyBlend = (float) Math.min(1.0, distance / 4.0);
+                    double upperBodyY = target.posY + target.getEyeHeight() * 0.7;
+                    targetY = targetY * (1 - upperBodyBlend) + upperBodyY * upperBodyBlend;
+                }
+                break;
+        }
+        
+        // Apply offset (vertical adjustment)
+        targetY += offset;
+        
+        double diffX = targetX - eye.x();
+        double diffZ = targetZ - eye.z();
+        double diffY = targetY - eye.y();
+        double dist = Math.sqrt(diffX * diffX + diffZ * diffZ);
+        
+        float yaw = (float) Math.toDegrees(Math.atan2(diffZ, diffX)) - 90.0f;
+        float pitch = (float) -Math.toDegrees(Math.atan2(diffY, dist));
+        
+        return new Pair<>(MathHelper.wrapAngleTo180_float(yaw), MathHelper.clamp_float(pitch, -90f, 90f));
+    }
+    
+    /**
+     * Advanced entropy bypass with configurable variance.
+     */
+    private Pair<Float, Float> applyAdvancedEntropyBypass(float stepYaw, float stepPitch, float gcd,
+                                                          float maxYawStep, float maxPitchStep, float variance) {
+        // Add controlled variance to break entropy patterns
+        float yawOut = stepYaw;
+        float pitchOut = stepPitch;
+        
+        // Vary the step sizes to create different entropy signatures
+        if (entropyTick % 4 == 0) {
+            yawOut += (Math.random() - 0.5) * variance * gcd * 4;
+        }
+        if (entropyTick % 6 == 0) {
+            pitchOut += (Math.random() - 0.5) * variance * gcd * 3;
+        }
+        
+        // Ensure yaw and pitch have different entropy
+        if (entropyTick % 8 == 0 && Math.abs(entropyLastYawStep) > 0.1f) {
+            yawOut = entropyLastYawStep * (0.8f + (float) Math.random() * 0.4f);
+        }
+        
+        // Prevent similar entropy between yaw and pitch windows
+        if (entropyTick % 10 == 0) {
+            float ratio = Math.abs(yawOut) > 0.01f ? Math.abs(pitchOut / yawOut) : 1.0f;
+            if (ratio > 0.9f && ratio < 1.1f) {
+                pitchOut *= (0.7f + (float) Math.random() * 0.3f);
+            }
+        }
+        
+        // Clamp and quantize
+        yawOut = MathHelper.clamp_float(yawOut, -maxYawStep, maxYawStep);
+        pitchOut = MathHelper.clamp_float(pitchOut, -maxPitchStep, maxPitchStep);
+        yawOut = Math.round(yawOut / gcd) * gcd;
+        pitchOut = Math.round(pitchOut / gcd) * gcd;
+        
+        return new Pair<>(yawOut, pitchOut);
     }
     
     private float[] getRotationsGeneral(EntityLivingBase target) {
@@ -916,6 +1316,11 @@ public class KillAuraRotation {
         // Stop jitter when very close
         if (Math.abs(yawDiff) < stopThreshold) quantizedYaw = 0f;
         if (Math.abs(pitchDiff) < stopThreshold) quantizedPitch = 0f;
+        
+        // MX Invalid Pitch bypass: Sanitize tiny pitch deltas
+        if (Math.abs(quantizedPitch) < 1e-4f && Math.abs(quantizedPitch) > 0) {
+            quantizedPitch = 0f;
+        }
 
         rotations[0] = MathHelper.wrapAngleTo180_float(currentYaw + quantizedYaw);
         rotations[1] = MathHelper.clamp_float(currentPitch + quantizedPitch, -90f, 90f);
@@ -1250,26 +1655,46 @@ public class KillAuraRotation {
             yaw = MathHelper.wrapAngleTo180_float(prevYaw + Math.signum(dyaw) * yawCap);
         }
 
-        // Sanitize denormals and very small deltas that MX can flag
-        if (Math.abs(dpitch) < 1e-6f) {
-            pitch = prevPitch;
-            dpitch = 0f;
+        // MX Invalid Pitch bypass: Sanitize denormals and very small deltas
+        // MX flags pitch values like -3.8146973E-6 as "Invalid Pitch"
+        // Threshold must be higher than typical denormal values (~1e-5)
+        float gcd = getMouseGCD();
+        float minValidDelta = Math.max(gcd * 0.5f, 0.001f); // At least half a GCD step or 0.001
+        
+        if (Math.abs(dpitch) < minValidDelta) {
+            // Either keep pitch unchanged or snap to a valid GCD-aligned value
+            if (Math.abs(dpitch) < 1e-4f) {
+                // Very tiny delta - just keep previous pitch to avoid invalid values
+                pitch = prevPitch;
+                dpitch = 0f;
+            } else {
+                // Small but non-negligible - round to nearest GCD
+                float roundedDelta = Math.round(dpitch / gcd) * gcd;
+                if (Math.abs(roundedDelta) < gcd * 0.5f) {
+                    pitch = prevPitch; // Rounds to zero, keep previous
+                    dpitch = 0f;
+                } else {
+                    pitch = prevPitch + roundedDelta;
+                    dpitch = roundedDelta;
+                }
+            }
         }
 
         float pitchCap = hasTarget ? 12.0f : 7.0f;
         if (Math.abs(dpitch) > pitchCap) {
             pitch = prevPitch + Math.signum(dpitch) * pitchCap;
-        } else if (hasTarget && allowJitter && Math.abs(dpitch) < 0.012f) {
+        } else if (hasTarget && allowJitter && Math.abs(dpitch) < 0.012f && dpitch == 0f) {
             // ensure a minimal change to avoid flat-line pitch flags
             // IMPORTANT: only when we intentionally allow "human noise".
             // When both player and target are stationary, forcing micro pitch changes
             // creates visible jitter in General mode (and similar algorithms).
-            float gcd = getMouseGCD();
-            pitch = prevPitch + Math.copySign(gcd, dpitch != 0.0f ? dpitch : (jitterFlip ? 1.0f : -1.0f));
+            // Only apply if dpitch was zeroed out (to avoid double-adding)
+            pitch = prevPitch + Math.copySign(gcd, jitterFlip ? 1.0f : -1.0f);
+            jitterFlip = !jitterFlip;
         }
 
-        // Remove denormal tiny values
-        if (Math.abs(pitch) < 1e-6f) {
+        // Remove denormal tiny absolute values (when pitch itself is near zero)
+        if (Math.abs(pitch) < 1e-4f) {
             pitch = 0f;
         }
 
