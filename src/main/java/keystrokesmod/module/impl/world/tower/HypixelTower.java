@@ -107,20 +107,28 @@ public class HypixelTower extends SubMode<Tower> {
             MovingObjectPosition lastScaffoldPlace = ModuleManager.scaffold.placeBlock;
             if (lastScaffoldPlace == null)
                 return;
-            Optional<Triple<BlockPos, EnumFacing, Vec3>> optionalPlaceSide = RotationUtils.getPlaceSide(
-                    lastScaffoldPlace.getBlockPos().add(deltaPlace),
-                    LIMIT_FACING
-            );
-            if (!optionalPlaceSide.isPresent())
-                return;
+            BlockPos targetPos = lastScaffoldPlace.getBlockPos().add(deltaPlace);
 
-            Triple<BlockPos, EnumFacing, Vec3> placeSide = optionalPlaceSide.get();
+            Raven.getExecutor().schedule(() -> mc.addScheduledTask(() -> {
+                if (!Utils.nullCheck() || ModuleManager.scaffold == null || !ModuleManager.scaffold.isEnabled()
+                        || !parent.canTower() || Utils.isMoving() || onlyWhileMoving.isToggled()) {
+                    return;
+                }
 
-            Raven.getExecutor().schedule(() -> ModuleManager.scaffold.place(
-                    new MovingObjectPosition(placeSide.getRight().toVec3(), placeSide.getMiddle(), placeSide.getLeft()),
-                    false
-            ), 50, TimeUnit.MILLISECONDS);
-//            ModuleManager.scaffold.tower$noBlockPlace = true;
+                Optional<Triple<BlockPos, EnumFacing, Vec3>> optionalPlaceSide = RotationUtils.getPlaceSide(
+                        targetPos,
+                        LIMIT_FACING
+                );
+                if (!optionalPlaceSide.isPresent()) {
+                    return;
+                }
+
+                Triple<BlockPos, EnumFacing, Vec3> placeSide = optionalPlaceSide.get();
+                ModuleManager.scaffold.place(
+                        new MovingObjectPosition(placeSide.getRight().toVec3(), placeSide.getMiddle(), placeSide.getLeft()),
+                        true
+                );
+            }), 50, TimeUnit.MILLISECONDS);
             blockPlaceRequest = false;
         }
     }

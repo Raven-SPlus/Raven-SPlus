@@ -4,7 +4,6 @@ import keystrokesmod.event.*;
 import keystrokesmod.helper.ScaffoldBlockCountHelper;
 import keystrokesmod.module.Module;
 import keystrokesmod.module.ModuleManager;
-import keystrokesmod.module.impl.combat.KillAura;
 import keystrokesmod.module.impl.other.RotationHandler;
 import keystrokesmod.module.setting.impl.ButtonSetting;
 import keystrokesmod.module.setting.impl.ModeSetting;
@@ -777,20 +776,19 @@ public class Scaffold extends Module {
             float facingY = packet.getPlacedBlockOffsetY();
             float facingZ = packet.getPlacedBlockOffsetZ();
             
-            // Special case: If all three are 0.0, Intave allows it - but randomize individual suspicious values
+            // Preserve true all-zero offsets. They are a valid vanilla pattern on some paths,
+            // and mutating them after the placement packet is built can make bypass behavior
+            // less consistent than leaving them untouched.
             boolean allZero = Math.abs(facingX) < 0.001f && Math.abs(facingY) < 0.001f && Math.abs(facingZ) < 0.001f;
             
-            if (!allZero) {
-                // Randomize values to avoid 0.0, 0.5, and >=1.0
-                facingX = randomizeFacingValue(facingX);
-                facingY = randomizeFacingValue(facingY);
-                facingZ = randomizeFacingValue(facingZ);
-            } else {
-                // All zero is allowed, but add tiny random offset to avoid pattern detection
-                facingX = (float) (Math.random() * 0.01);
-                facingY = (float) (Math.random() * 0.01);
-                facingZ = (float) (Math.random() * 0.01);
+            if (allZero) {
+                return;
             }
+
+            // Randomize values to avoid 0.0, 0.5, and >=1.0
+            facingX = randomizeFacingValue(facingX);
+            facingY = randomizeFacingValue(facingY);
+            facingZ = randomizeFacingValue(facingZ);
             
             accessor.setFacingX(facingX);
             accessor.setFacingY(facingY);
@@ -816,12 +814,12 @@ public class Scaffold extends Module {
         if (isSuspicious) {
             // Generate a completely safe random value
             // Safe ranges: [0.05, 0.45] or [0.55, 0.95]
-            if (Math.random() < 0.5) {
+            if (intaveRandom.nextBoolean()) {
                 // Lower safe range: 0.05 to 0.45
-                return (float) (0.05 + Math.random() * 0.40);
+                return (float) (0.05 + intaveRandom.nextDouble() * 0.40);
             } else {
                 // Upper safe range: 0.55 to 0.95
-                return (float) (0.55 + Math.random() * 0.40);
+                return (float) (0.55 + intaveRandom.nextDouble() * 0.40);
             }
         }
         
@@ -830,30 +828,30 @@ public class Scaffold extends Module {
         
         // If too close to 0.0
         if (value < 0.05f) {
-            return (float) (0.05 + Math.random() * 0.15); // 0.05 to 0.20
+            return (float) (0.05 + intaveRandom.nextDouble() * 0.15); // 0.05 to 0.20
         }
         
         // If too close to 0.5 (within 0.05)
         if (value > 0.45f && value < 0.55f) {
             if (value < 0.5f) {
-                return (float) (0.35 + Math.random() * 0.10); // 0.35 to 0.45
+                return (float) (0.35 + intaveRandom.nextDouble() * 0.10); // 0.35 to 0.45
             } else {
-                return (float) (0.55 + Math.random() * 0.10); // 0.55 to 0.65
+                return (float) (0.55 + intaveRandom.nextDouble() * 0.10); // 0.55 to 0.65
             }
         }
         
         // If too close to 1.0
         if (value > 0.95f) {
-            return (float) (0.80 + Math.random() * 0.15); // 0.80 to 0.95
+            return (float) (0.80 + intaveRandom.nextDouble() * 0.15); // 0.80 to 0.95
         }
         
         // Value is already in safe range, add tiny variation to avoid exact patterns
-        float variation = (float) ((Math.random() - 0.5) * 0.02); // ±0.01
+        float variation = (intaveRandom.nextFloat() - 0.5f) * 0.02f; // ±0.01
         float result = value + variation;
         
         // Final safety clamp
-        if (result < 0.05f) result = 0.05f + (float)(Math.random() * 0.05);
-        if (result > 0.95f) result = 0.90f + (float)(Math.random() * 0.05);
+        if (result < 0.05f) result = 0.05f + (float)(intaveRandom.nextDouble() * 0.05);
+        if (result > 0.95f) result = 0.90f + (float)(intaveRandom.nextDouble() * 0.05);
         if (result > 0.45f && result < 0.55f) {
             result = result < 0.5f ? 0.42f : 0.58f;
         }
@@ -882,10 +880,6 @@ public class Scaffold extends Module {
 
             // LongJump.stopModules removed - not needed
 
-            if (KillAura.target != null) {
-                return;
-            }
-
             hasSwapped = true;
             int mode = (int) fastScaffold.getInput();
             if (rotation.getInput() == 0 || rotationDelay == 0) {
@@ -897,13 +891,13 @@ public class Scaffold extends Module {
                 if ((int) mc.thePlayer.posY > (int) startYPos) {
                     switch (mode) {
                         case 1:
-                            if (!firstKeepYPlace && keepYTicks == 8 || keepYTicks == 11) {
+                            if ((!firstKeepYPlace && keepYTicks == 8) || keepYTicks == 11) {
                                 placeBlock(1, 0);
                                 firstKeepYPlace = true;
                             }
                             break;
                         case 2:
-                            if (!firstKeepYPlace && keepYTicks == 8 || firstKeepYPlace && keepYTicks == 7) {
+                            if ((!firstKeepYPlace && keepYTicks == 8) || (firstKeepYPlace && keepYTicks == 7)) {
                                 placeBlock(1, 0);
                                 firstKeepYPlace = true;
                             }
@@ -1089,6 +1083,10 @@ public class Scaffold extends Module {
     }
 
     private void place(PlaceData block) {
+        place(block, false);
+    }
+
+    private void place(PlaceData block, boolean bypassTimingThrottle) {
         ItemStack heldItem = mc.thePlayer.getHeldItem();
         if (heldItem == null || !(heldItem.getItem() instanceof ItemBlock) || !ContainerUtils.canBePlaced((ItemBlock) heldItem.getItem())) {
             return;
@@ -1100,7 +1098,7 @@ public class Scaffold extends Module {
         // Intave 12 bypass: Timing with variance to avoid balance detection
         // Key insight: Intave uses BalanceUtils to detect low variance (machine-like) timing
         // We need HIGH variance in placement intervals to appear human
-        if (intaveBypass.isToggled() && intaveTimingMode.getInput() > 0) {
+        if (!bypassTimingThrottle && intaveBypass.isToggled() && intaveTimingMode.getInput() > 0) {
             if (lastPlacementTime > 0) {
                 long timeSinceLastPlacement = currentTime - lastPlacementTime;
                 
@@ -1115,7 +1113,7 @@ public class Scaffold extends Module {
                     // Simple random delay (less effective against balance checks)
                     long minDelay = intaveTimingMode.getInput() == 1 ? 20 : 0;
                     long maxDelay = intaveTimingMode.getInput() == 1 ? 50 : 20;
-                    requiredDelay = minDelay + (long)(Math.random() * (maxDelay - minDelay));
+                    requiredDelay = minDelay + (long) (intaveRandom.nextDouble() * (maxDelay - minDelay));
                 }
                 
                 if (timeSinceLastPlacement < requiredDelay) {
@@ -1193,11 +1191,11 @@ public class Scaffold extends Module {
         //   C08(extra) -> InteractEvent(clicks=1). Placement fails (occupied). No BlockPlaceEvent.
         //   C08(real)  -> InteractEvent(clicks=2). BlockPlaceEvent: clicks>=2 -> PASS.
         
-        if (intaveBypass.isToggled() && intaveClickVariation.isToggled() && lastPlacedBlockPos != null) {
+        if (intaveBypass.isToggled() && intaveClickVariation.isToggled() && lastPlacedBlockPos != null && lastPlacedExtraFacing != null) {
             // Extra click to previous block (raw C08, goes through onSendPacket for face randomization)
-            float fX = 0.1f + (float)(Math.random() * 0.35);
-            float fY = 0.1f + (float)(Math.random() * 0.35);
-            float fZ = 0.1f + (float)(Math.random() * 0.35);
+            float fX = 0.1f + intaveRandom.nextFloat() * 0.35f;
+            float fY = 0.1f + intaveRandom.nextFloat() * 0.35f;
+            float fZ = 0.1f + intaveRandom.nextFloat() * 0.35f;
             mc.thePlayer.sendQueue.addToSendQueue(new C08PacketPlayerBlockPlacement(
                     lastPlacedBlockPos, lastPlacedExtraFacing.getIndex(), heldItem, fX, fY, fZ));
         }
@@ -1237,10 +1235,9 @@ public class Scaffold extends Module {
         if (heldItem == null || !(heldItem.getItem() instanceof ItemBlock) || !ContainerUtils.canBePlaced((ItemBlock) heldItem.getItem())) {
             return;
         }
-        if (mc.playerController.onPlayerRightClick(mc.thePlayer, mc.theWorld, heldItem, block.getBlockPos(), block.sideHit, block.hitVec)) {
-            mc.thePlayer.swingItem();
-            hasPlaced = true;
-        }
+        PlaceData placeData = new PlaceData(block.getBlockPos(), block.sideHit);
+        placeData.hitVec = block.hitVec != null ? block.hitVec : createPlacementHitVec(block.getBlockPos(), block.sideHit);
+        place(placeData, extra);
     }
 
     public int totalBlocks() {
@@ -1322,11 +1319,12 @@ public class Scaffold extends Module {
 
         // Calculate hitVec - the randomization will be applied in onSendPacket via block face offsets
         // Keep hitVec calculation similar to reference for placement accuracy
-        double hitX = (blockX + 0.5D) + getCoord(blockFacing.getOpposite(), "x") * 0.5D;
-        double hitY = (blockY + 0.5D) + getCoord(blockFacing.getOpposite(), "y") * 0.5D;
-        double hitZ = (blockZ + 0.5D) + getCoord(blockFacing.getOpposite(), "z") * 0.5D;
-        lookVec = new Vec3(0.5D + getCoord(blockFacing.getOpposite(), "x") * 0.5D, 0.5D + getCoord(blockFacing.getOpposite(), "y") * 0.5D, 0.5D + getCoord(blockFacing.getOpposite(), "z") * 0.5D);
-        hitVec = new Vec3(hitX, hitY, hitZ);
+        hitVec = createPlacementHitVec(blockInfo.blockPos, blockFacing);
+        lookVec = new Vec3(
+                hitVec.xCoord - blockInfo.blockPos.getX(),
+                hitVec.yCoord - blockInfo.blockPos.getY(),
+                hitVec.zCoord - blockInfo.blockPos.getZ()
+        );
         blockInfo.hitVec = hitVec;
     }
 
@@ -1470,7 +1468,6 @@ public class Scaffold extends Module {
             if (potionEffect.getEffectName().equals("potion.moveSpeed")) {
                 return potionEffect.getAmplifier() + 1;
             }
-            return 0;
         }
         return 0;
     }
@@ -1479,7 +1476,7 @@ public class Scaffold extends Module {
 
     double getSpeed(int speedLevel) {
         if (speedLevel >= 0) {
-            return speedLevels[speedLevel];
+            return speedLevels[Math.min(speedLevels.length - 1, speedLevel)];
         }
         return speedLevels[0];
     }
@@ -1493,7 +1490,7 @@ public class Scaffold extends Module {
         if (mc.thePlayer.moveStrafing != 0 && mc.thePlayer.moveForward != 0) min = 0.003;
         value = floatSpeedLevels[0] - min;
         if (speedLevel >= 0) {
-            value = floatSpeedLevels[speedLevel] - min;
+            value = floatSpeedLevels[Math.min(floatSpeedLevels.length - 1, speedLevel)] - min;
         }
         value *= input;
         return value;
@@ -1533,12 +1530,11 @@ public class Scaffold extends Module {
      * to create high variance while still being fast enough to scaffold.
      */
     private long calculateVariedDelay(boolean safeMode) {
-        // Base ranges for safe/aggressive modes
-        // Vanilla right-click hold = 250ms (timer=4, ~4 CPS). Target similar rates.
-        // Safe: 120-250ms (~4-8 CPS, avg ~5.4). With 1 extra click -> ~10.8 CPS total.
-        // Aggressive: 50-150ms (~7-20 CPS). With extra click -> higher.
-        long minBase = safeMode ? 120 : 50;
-        long maxBase = safeMode ? 250 : 150;
+        // Use a tighter timing window for fast-scaffold/tower flows so the bypass remains usable,
+        // but keep enough spread that placements do not look machine-perfect.
+        boolean fastPlacement = usingFastScaffold() || (ModuleManager.tower != null && ModuleManager.tower.canTower());
+        long minBase = fastPlacement ? (safeMode ? 70 : 40) : (safeMode ? 95 : 55);
+        long maxBase = fastPlacement ? (safeMode ? 115 : 85) : (safeMode ? 155 : 110);
         
         // Use placement count to create a pattern with high variance
         // Every few placements, use a noticeably different delay
@@ -1574,6 +1570,39 @@ public class Scaffold extends Module {
         
         // Clamp to valid range
         return Math.max(minBase, Math.min(maxBase, delay));
+    }
+
+    private Vec3 createPlacementHitVec(BlockPos blockPos, EnumFacing blockFacing) {
+        if (!intaveBypass.isToggled()) {
+            double hitX = (blockPos.getX() + 0.5D) + getCoord(blockFacing.getOpposite(), "x") * 0.5D;
+            double hitY = (blockPos.getY() + 0.5D) + getCoord(blockFacing.getOpposite(), "y") * 0.5D;
+            double hitZ = (blockPos.getZ() + 0.5D) + getCoord(blockFacing.getOpposite(), "z") * 0.5D;
+            return new Vec3(hitX, hitY, hitZ);
+        }
+
+        double offsetX = getPlacementAxisOffset(blockFacing, EnumFacing.Axis.X);
+        double offsetY = getPlacementAxisOffset(blockFacing, EnumFacing.Axis.Y);
+        double offsetZ = getPlacementAxisOffset(blockFacing, EnumFacing.Axis.Z);
+        return new Vec3(blockPos.getX() + offsetX, blockPos.getY() + offsetY, blockPos.getZ() + offsetZ);
+    }
+
+    private double getPlacementAxisOffset(EnumFacing blockFacing, EnumFacing.Axis axis) {
+        if (blockFacing.getAxis() == axis) {
+            if (blockFacing.getAxisDirection() == EnumFacing.AxisDirection.POSITIVE) {
+                return sanitizePlacementOffset(0.82D + intaveRandom.nextDouble() * 0.12D);
+            }
+            return sanitizePlacementOffset(0.06D + intaveRandom.nextDouble() * 0.12D);
+        }
+
+        return sanitizePlacementOffset(0.18D + intaveRandom.nextDouble() * 0.64D);
+    }
+
+    private double sanitizePlacementOffset(double offset) {
+        double clamped = Math.max(0.05D, Math.min(0.95D, offset));
+        if (clamped > 0.46D && clamped < 0.54D) {
+            clamped = clamped < 0.5D ? 0.44D : 0.56D;
+        }
+        return clamped;
     }
     
     public float hardcodedYaw() {

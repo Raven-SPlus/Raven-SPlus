@@ -12,6 +12,7 @@ import org.lwjgl.opengl.GL11;
 import java.awt.Color;
 
 public class PanelClickGui {
+    private static final int CATEGORY_STEP = 28;
     private static Module.category currentCategory = Module.category.combat;
     private static float scrollY = 0;
     private static float targetScrollY = 0;
@@ -32,11 +33,11 @@ public class PanelClickGui {
             ScaledResolution sr = new ScaledResolution(keystrokesmod.Raven.mc);
             x = sr.getScaledWidth() / 2 - width / 2;
             y = sr.getScaledHeight() / 2 - height / 2;
+            currentCategory = Module.category.combat;
+            scrollY = 0;
+            targetScrollY = 0;
             initialized = true;
         }
-        currentCategory = Module.category.combat;
-        scrollY = 0;
-        targetScrollY = 0;
     }
 
     public static void drawScreen(int mouseX, int mouseY, float partialTicks, ClickGui parent) {
@@ -100,7 +101,7 @@ public class PanelClickGui {
             }
 
             FontManager.productSans20.drawString(category.name(), x + 25, catY, color);
-            catY += 28;
+            catY += CATEGORY_STEP;
         }
 
         // Content Area
@@ -124,13 +125,6 @@ public class PanelClickGui {
             categoryComponent.width(contentWidth);
             categoryComponent.y(contentY + (int)scrollY);
 
-            // Handle Scroll
-            int dWheel = Mouse.getDWheel();
-            if (dWheel != 0) {
-                if (dWheel > 0) targetScrollY += 20;
-                else targetScrollY -= 20;
-            }
-            
             // Clamp target scroll
             if (targetScrollY > 0) targetScrollY = 0;
             if (maxScroll > 0 && targetScrollY < -maxScroll) targetScrollY = -maxScroll;
@@ -184,7 +178,7 @@ public class PanelClickGui {
                     scrollY = 0;
                     return;
                 }
-                catY += 30;
+                catY += CATEGORY_STEP;
             }
             return;
         }
@@ -220,6 +214,15 @@ public class PanelClickGui {
     }
     
     public static void handleMouseInput() {
-        // Handled in drawScreen for now as DWheel access is static
+        int dWheel = Mouse.getDWheel();
+        if (dWheel == 0) {
+            return;
+        }
+
+        if (dWheel > 0) {
+            targetScrollY += 20;
+        } else {
+            targetScrollY -= 20;
+        }
     }
 }
