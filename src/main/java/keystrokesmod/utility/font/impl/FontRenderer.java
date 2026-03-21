@@ -3,8 +3,6 @@ package keystrokesmod.utility.font.impl;
 import keystrokesmod.utility.font.CenterMode;
 import keystrokesmod.utility.font.IFont;
 import keystrokesmod.utility.render.ColorUtils;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.ScaledResolution;
 import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 
@@ -64,8 +62,6 @@ public class FontRenderer extends CharRenderer implements IFont {
     }
 
     public void drawString(String text, double x, double y, int color, boolean shadow) {
-        ScaledResolution sr = new ScaledResolution(Minecraft.getMinecraft());
-
         if (text == null) {
             return;
         }
@@ -78,10 +74,9 @@ public class FontRenderer extends CharRenderer implements IFont {
 
         CharData[] currentData = this.charData;
         double alpha = (color >> 24 & 255) / 255f;
-        x = (x - 1) * sr.getScaleFactor();
-        y = (y - 3) * sr.getScaleFactor() - 0.2;
+        x = x - 1;
+        y = y - 3.2;
         GL11.glPushMatrix();
-        GL11.glScaled((double) 1 / sr.getScaleFactor(), 1 / (double) sr.getScaleFactor(), 1 / (double) sr.getScaleFactor());
         GlStateManager.enableBlend();
         GlStateManager.blendFunc(770, 771);
         ColorUtils.setColor(color);
@@ -162,8 +157,6 @@ public class FontRenderer extends CharRenderer implements IFont {
     }
 
     public double getStringWidth(String text) {
-        ScaledResolution sr = new ScaledResolution(Minecraft.getMinecraft());
-
         if (text == null) {
             return 0;
         }
@@ -181,13 +174,11 @@ public class FontRenderer extends CharRenderer implements IFont {
             }
         }
 
-        return width / (double) sr.getScaleFactor();
+        return width;
     }
 
     public double getHeight() {
-        ScaledResolution sr = new ScaledResolution(Minecraft.getMinecraft());
-
-        return (this.fontHeight - 8) / (double) sr.getScaleFactor();
+        return this.fontHeight - 8;
     }
 
     @Override
