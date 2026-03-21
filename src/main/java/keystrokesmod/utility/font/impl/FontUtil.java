@@ -11,7 +11,7 @@ import java.util.Map;
 public class FontUtil {
     public static Font getResource(Map<String, Font> locationMap, String location, int size) {
         Font font;
-        size = Math.max(1, Math.round(size / 2.0f));
+        size = Math.max(1, size);
 
         try {
             if (locationMap.containsKey(location)) {

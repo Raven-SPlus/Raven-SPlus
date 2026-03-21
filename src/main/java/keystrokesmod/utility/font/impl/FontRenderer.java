@@ -18,6 +18,8 @@ import java.util.List;
  * @since 28/07/2024
  */
 public class FontRenderer extends CharRenderer implements IFont {
+    private static final double RENDER_SCALE = 0.5D;
+    private static final double ATLAS_SCALE = 1.0D / RENDER_SCALE;
 
     final CharData[] boldChars = new CharData[256];
     final CharData[] italicChars = new CharData[256];
@@ -74,9 +76,10 @@ public class FontRenderer extends CharRenderer implements IFont {
 
         CharData[] currentData = this.charData;
         double alpha = (color >> 24 & 255) / 255f;
-        x = x - 1;
-        y = y - 3.2;
+        x = (x - 1) * ATLAS_SCALE;
+        y = (y - 3.2) * ATLAS_SCALE;
         GL11.glPushMatrix();
+        GL11.glScaled(RENDER_SCALE, RENDER_SCALE, 1.0D);
         GlStateManager.enableBlend();
         GlStateManager.blendFunc(770, 771);
         ColorUtils.setColor(color);
@@ -174,11 +177,11 @@ public class FontRenderer extends CharRenderer implements IFont {
             }
         }
 
-        return width;
+        return width * RENDER_SCALE;
     }
 
     public double getHeight() {
-        return this.fontHeight - 8;
+        return (this.fontHeight - 8) * RENDER_SCALE;
     }
 
     @Override
