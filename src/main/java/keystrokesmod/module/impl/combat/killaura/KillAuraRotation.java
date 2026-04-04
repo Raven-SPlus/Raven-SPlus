@@ -794,10 +794,8 @@ public class KillAuraRotation {
         if (parent.advModuloBypass != null && parent.advModuloBypass.isToggled()) {
             float newYaw = rotations[0] + stepYaw;
             if (Math.abs(newYaw) > 270f && parent.rotationMode != null && parent.rotationMode.getInput() == 1) {
-                float offset = 720f;
-                float sign = newYaw == 0 ? 1f : Math.signum(newYaw);
-                newYaw += sign * offset;
-                stepYaw = newYaw - rotations[0];
+                float wrappedYaw = MathHelper.wrapAngleTo180_float(newYaw);
+                stepYaw = RotationUtils.normalize(wrappedYaw - rotations[0]);
             }
         }
         
@@ -901,8 +899,23 @@ public class KillAuraRotation {
         generalYawCarry = MathHelper.clamp_float((yawDiff - desiredYawStep) * 0.6f, -maxYawStep, maxYawStep);
         generalPitchCarry = MathHelper.clamp_float((pitchDiff - desiredPitchStep) * 0.6f, -maxPitchStep, maxPitchStep);
 
-        float yawAcceleration = Math.max(gcd * 2.5f, maxYawStep * (0.18f + acceleration * 0.22f));
-        float pitchAcceleration = Math.max(gcd * 2.0f, maxPitchStep * (0.18f + acceleration * 0.18f));
+        float yawDistanceFactor = Math.min(1.0f, Math.abs(yawDiff) / Math.max(maxYawStep * 1.75f, 1.0f));
+        float pitchDistanceFactor = Math.min(1.0f, Math.abs(pitchDiff) / Math.max(maxPitchStep * 1.75f, 1.0f));
+        float yawAcceleration = Math.max(gcd * 2.8f, maxYawStep * (0.30f + acceleration * 0.28f + yawDistanceFactor * 0.26f));
+        float pitchAcceleration = Math.max(gcd * 2.2f, maxPitchStep * (0.26f + acceleration * 0.22f + pitchDistanceFactor * 0.20f));
+
+        if (Math.abs(yawDiff) > maxYawStep * 1.2f) {
+            float launchYaw = Math.copySign(Math.min(maxYawStep * (0.58f + yawDistanceFactor * 0.18f), Math.abs(desiredYawStep)), desiredYawStep);
+            if (Math.abs(yawVelocity) < Math.abs(launchYaw)) {
+                yawVelocity = launchYaw;
+            }
+        }
+        if (Math.abs(pitchDiff) > maxPitchStep * 1.1f) {
+            float launchPitch = Math.copySign(Math.min(maxPitchStep * (0.50f + pitchDistanceFactor * 0.16f), Math.abs(desiredPitchStep)), desiredPitchStep);
+            if (Math.abs(pitchVelocity) < Math.abs(launchPitch)) {
+                pitchVelocity = launchPitch;
+            }
+        }
 
         yawVelocity = moveTowards(yawVelocity, desiredYawStep, yawAcceleration);
         pitchVelocity = moveTowards(pitchVelocity, desiredPitchStep, pitchAcceleration);
@@ -1300,10 +1313,8 @@ public class KillAuraRotation {
             return rots;
         }
         float yaw = rots[0];
-        if (Math.abs(yaw) < 270f) {
-            float offset = 720f;
-            float sign = yaw == 0 ? 1f : Math.signum(yaw);
-            yaw += sign * offset;
+        if (Math.abs(yaw) > 180f) {
+            yaw = MathHelper.wrapAngleTo180_float(yaw);
         }
         rots[0] = yaw;
         return rots;
