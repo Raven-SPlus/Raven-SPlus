@@ -82,26 +82,7 @@ public class AutoClicker extends IAutoClicker {
         }
     }
 
-    @Override
-    public boolean click() {
-        // If KillAura is using AutoClicker settings, check if KillAura has a valid target
-        if (ModuleManager.killAura != null && ModuleManager.killAura.isEnabled() && ModuleManager.killAura.useAutoClickerSettings.isToggled()) {
-            // KillAura will handle the target check, so we just perform the click
-            if (mc.currentScreen == null && HitSelect.canAttack()) {
-                if (mc.objectMouseOver != null && mc.objectMouseOver.typeOfHit == MovingObjectPosition.MovingObjectType.BLOCK) {
-                    if (breakBlocks.isToggled()) {
-                        return false;
-                    } else {
-                        ((PlayerControllerMPAccessor) mc.playerController).setCurBlockDamageMP(0);
-                    }
-                }
-
-                Utils.sendClick(0, true);
-                return true;
-            }
-            return false;
-        }
-        
+    private boolean sendClick(boolean allowInventoryFill) {
         if (mc.currentScreen == null && HitSelect.canAttack()) {
             if (mc.objectMouseOver != null && mc.objectMouseOver.typeOfHit == MovingObjectPosition.MovingObjectType.BLOCK) {
                 if (breakBlocks.isToggled()) {
@@ -113,11 +94,20 @@ public class AutoClicker extends IAutoClicker {
 
             Utils.sendClick(0, true);
             return true;
-        } else if (inventoryFill.isToggled() && mc.currentScreen instanceof GuiContainer) {
+        } else if (allowInventoryFill && inventoryFill.isToggled() && mc.currentScreen instanceof GuiContainer) {
             inventoryClick = true;
             return true;
         }
+
         return false;
+    }
+
+    @Override
+    public boolean click() {
+        boolean usingKillAuraSettings = ModuleManager.killAura != null
+                && ModuleManager.killAura.isEnabled()
+                && ModuleManager.killAura.useAutoClickerSettings.isToggled();
+        return sendClick(!usingKillAuraSettings);
     }
 
     @SubscribeEvent

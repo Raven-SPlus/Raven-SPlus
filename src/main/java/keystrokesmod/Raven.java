@@ -128,7 +128,7 @@ public class Raven {
                             module.guiUpdate();
                         }
 
-                        if (module.isEnabled()) {
+                        if (module.isActive()) {
                             module.onUpdate();
                         }
                     }

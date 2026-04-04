@@ -11,6 +11,7 @@ import keystrokesmod.module.setting.impl.SubMode;
 import keystrokesmod.module.setting.utils.ModeOnly;
 import keystrokesmod.utility.font.FontManager;
 import keystrokesmod.utility.font.IFont;
+import keystrokesmod.utility.render.ColorUtils;
 import keystrokesmod.utility.render.RenderUtils;
 import keystrokesmod.utility.render.blur.HudBlurBatcher;
 import keystrokesmod.utility.Theme;
@@ -32,6 +33,12 @@ import java.util.*;
 import java.util.List;
 
 public class HUD extends Module {
+    private static final double ROW_TOP_SPACING = 2.0;
+    private static final double ROW_HORIZONTAL_PADDING = 6.0;
+    private static final double ROW_VERTICAL_PADDING = 2.0;
+    private static final double ROW_GAP = 2.0;
+    private static final int INFO_SHADOW_SWAP_BASE_COLOR = new Color(170, 170, 170, 255).getRGB();
+
     public static ModeSetting theme;
     public static ModeSetting font;
     public static ButtonSetting dropShadow;
@@ -40,6 +47,9 @@ public class HUD extends Module {
     private final ButtonSetting sidebar;
     private final ButtonSetting blurBackground;
     public static SliderSetting blurStrength;
+    private static SliderSetting moduleSpacing;
+    private static SliderSetting backgroundWidthPadding;
+    private static SliderSetting backgroundHeightPadding;
     public static ButtonSetting alphabeticalSort;
     private static ButtonSetting alignRight;
     public static ButtonSetting lowercase;
@@ -82,6 +92,9 @@ public class HUD extends Module {
         this.registerSetting(blurBackground = new ButtonSetting("Blur background", false, background::isToggled));
         // Global blur strength used by HUD + any HUD overlays that request blur.
         this.registerSetting(blurStrength = new SliderSetting("Blur strength", 15.0, 1.0, 64.0, 1.0));
+        this.registerSetting(moduleSpacing = new SliderSetting("Module spacing", ROW_GAP, 0.0, 12.0, 0.5));
+        this.registerSetting(backgroundWidthPadding = new SliderSetting("Background width", ROW_HORIZONTAL_PADDING, 0.0, 20.0, 0.5, background::isToggled));
+        this.registerSetting(backgroundHeightPadding = new SliderSetting("Background height", ROW_VERTICAL_PADDING * 2.0, 0.0, 16.0, 0.5, background::isToggled));
         this.registerSetting(sidebar = new ButtonSetting("Sidebar", false));
         this.registerSetting(textOffset = new SliderSetting("Horizontal text offset", 0.0, -10.0, 10.0, 0.1));
         this.registerSetting(verticalTextOffset = new SliderSetting("Vertical text offset", 0.0, -10.0, 10.0, 0.1));
@@ -138,169 +151,45 @@ public class HUD extends Module {
             hudX = res.getScaledWidth() - 5;
         }
         
-        // Add spacing at the top of array list
-        double topSpacing = 2.0;
-        int n = (int) (hudY + topSpacing);
-        double n2 = 0.0;
         try {
-            List<String> texts = getDrawTexts();
-            
-            if (texts.isEmpty()) {
+            List<HudEntry> entries = getDrawEntries();
+
+            if (entries.isEmpty()) {
                 return;
             }
-            
-            // Calculate background bounds (backgrounds stay at original position)
-            double offset = textOffset != null ? textOffset.getInput() : 0.0;
-            double leftExtend = 3.0; // Extend background more to the left for each row
-            double rowHeight = Math.round(getFontRenderer().height() + 2);
-            double bgOpacity = backgroundOpacity != null ? backgroundOpacity.getInput() : 100.0;
-            int bgColor = new Color(0, 0, 0, (int) bgOpacity).getRGB();
-            
-            // Check if blur is enabled
+
             boolean shouldBlur = background.isToggled() && blurBackground.isToggled() && blurStrength != null && blurStrength.getInput() > 0;
+            double bgOpacity = backgroundOpacity != null ? backgroundOpacity.getInput() : 100.0;
+            List<HudRow> rows = buildHudRows(entries);
 
             if (shouldBlur) {
                 final int blurRadius = (int) blurStrength.getInput();
-
-                // Precompute rects once (used for stencil + overlay)
-                final java.util.ArrayList<double[]> backgroundRects = new java.util.ArrayList<>();
-                int currentY = (int) (hudY + topSpacing);
-                for (String text : texts) {
-                    double width = getFontRenderer().width(text);
-                    double backgroundX;
-                    double backgroundWidth;
-                    if (alignRight.isToggled()) {
-                        backgroundX = hudX - width - offset - leftExtend;
-                        backgroundWidth = width + offset + leftExtend;
-                    } else {
-                        backgroundX = hudX - leftExtend;
-                        backgroundWidth = width + offset + leftExtend;
-                    }
-                    double bgY = currentY - 1;
-                    double bgHeight = rowHeight + 1; // connected rows for blur
-                    backgroundRects.add(new double[]{backgroundX, bgY, backgroundWidth, bgHeight});
-                    currentY += rowHeight;
-                }
-
-                // 1) Blur stencil (batched)
                 HudBlurBatcher.addBlurStencil(blurRadius, () -> {
-                    if (!backgroundRects.isEmpty()) {
-                        for (double[] rect : backgroundRects) {
-                            RenderUtils.drawRect(rect[0], rect[1], rect[0] + rect[2], rect[1] + rect[3], -1);
-                        }
+                    for (HudRow row : rows) {
+                        RenderUtils.drawRoundedRectangle(
+                                (float) row.backgroundX,
+                                (float) row.backgroundY,
+                                (float) (row.backgroundX + row.backgroundWidth),
+                                (float) (row.backgroundY + row.backgroundHeight),
+                                getHudRowRadius(row),
+                                -1
+                        );
                     }
                 });
 
-                // 2) Foreground draw after blur (keep text sharp)
                 HudBlurBatcher.addAfterBlur(() -> {
-                    // Draw darkness overlay on top of blurred area (just draw the same rects)
-                    if (bgOpacity > 0 && !backgroundRects.isEmpty()) {
-                        for (double[] rect : backgroundRects) {
-                            RenderUtils.drawRect(rect[0], rect[1], rect[0] + rect[2], rect[1] + rect[3], bgColor);
-                        }
+                    if (bgOpacity > 0) {
+                        drawHudRows(rows, bgOpacity, false);
                     }
-
-                    // Draw all text and sidebars after blur is complete
-                    double verticalOffset = verticalTextOffset != null ? verticalTextOffset.getInput() : 0.0;
-                    int baseY = (int) (hudY + topSpacing);
-                    int textY = (int) (hudY + topSpacing - verticalOffset);
-                    double gradOffset = 0.0;
-
-                    int yRow = baseY;
-                    for (String text : texts) {
-                        int e = Theme.getGradient((int) theme.getInput(), gradOffset);
-                        if (theme.getInput() == 0) {
-                            gradOffset -= 120;
-                        } else {
-                            gradOffset -= 12;
-                        }
-
-                        double xText = hudX;
-                        double width = getFontRenderer().width(text);
-
-                        // Base text position (without offset) for sidebar
-                        double baseTextX = hudX;
-                        if (alignRight.isToggled()) {
-                            baseTextX -= width;
-                        }
-
-                        // Apply horizontal text offset
-                        if (alignRight.isToggled()) {
-                            xText -= width;
-                            xText += offset;
-                        } else {
-                            xText -= offset;
-                        }
-
-                        // Sidebar stays at original position (no offset)
-                        if (sidebar.isToggled()) {
-                            double sidebarX = alignRight.isToggled() ? baseTextX + width : baseTextX - 2;
-                            RenderUtils.drawRect(sidebarX, yRow - 1, sidebarX + 1, yRow + Math.round(getFontRenderer().height() + 1), new Color(255, 255, 255, 200).getRGB());
-                        }
-
-                        getFontRenderer().drawString(text, xText, textY, e, dropShadow.isToggled());
-                        textY += rowHeight;
-                        yRow += rowHeight;
-                    }
+                    drawHudRowForeground(rows);
                 });
                 return;
             }
 
-            // Non-blur path: draw immediately (existing behavior)
-            if (background.isToggled()) {
-                int currentY = (int) (hudY + topSpacing);
-                for (String text : texts) {
-                    double width = getFontRenderer().width(text);
-                    double backgroundX;
-                    double backgroundWidth;
-                    if (alignRight.isToggled()) {
-                        backgroundX = hudX - width - offset - leftExtend;
-                        backgroundWidth = width + offset + leftExtend;
-                    } else {
-                        backgroundX = hudX - leftExtend;
-                        backgroundWidth = width + offset + leftExtend;
-                    }
-                    double bgY = currentY - 1;
-                    double bgHeight = Math.round(getFontRenderer().height() + 1);
-                    RenderUtils.drawRect(backgroundX, bgY, backgroundX + backgroundWidth, bgY + bgHeight, bgColor);
-                    currentY += rowHeight;
-                }
+            if (background.isToggled() && bgOpacity > 0) {
+                drawHudRows(rows, bgOpacity, true);
             }
-
-            double verticalOffset = verticalTextOffset != null ? verticalTextOffset.getInput() : 0.0;
-            int baseY = (int) (hudY + topSpacing);
-            n = (int) (hudY + topSpacing - verticalOffset);
-            n2 = 0.0;
-            for (String text : texts) {
-                int e = Theme.getGradient((int) theme.getInput(), n2);
-                if (theme.getInput() == 0) {
-                    n2 -= 120;
-                } else {
-                    n2 -= 12;
-                }
-                double n3 = hudX;
-                double width = getFontRenderer().width(text);
-
-                double baseTextX = hudX;
-                if (alignRight.isToggled()) {
-                    baseTextX -= width;
-                }
-
-                if (alignRight.isToggled()) {
-                    n3 -= width;
-                    n3 += offset;
-                } else {
-                    n3 -= offset;
-                }
-
-                if (sidebar.isToggled()) {
-                    double sidebarX = alignRight.isToggled() ? baseTextX + width : baseTextX - 2;
-                    RenderUtils.drawRect(sidebarX, baseY - 1, sidebarX + 1, baseY + Math.round(getFontRenderer().height() + 1), new Color(255, 255, 255, 200).getRGB());
-                }
-                getFontRenderer().drawString(text, n3, n, e, dropShadow.isToggled());
-                n += rowHeight;
-                baseY += rowHeight;
-            }
+            drawHudRowForeground(rows);
         }
         catch (Exception exception) {
             Utils.sendMessage("&cAn error occurred rendering HUD. check your logs");
@@ -309,24 +198,182 @@ public class HUD extends Module {
         }
     }
 
+    private @NotNull List<HudRow> buildHudRows(@NotNull List<HudEntry> entries) {
+        IFont fontRenderer = getFontRenderer();
+        List<HudRow> rows = new ArrayList<>(entries.size());
+        double currentY = hudY + ROW_TOP_SPACING;
+        double horizontalOffset = textOffset != null ? textOffset.getInput() : 0.0;
+        double verticalOffset = verticalTextOffset != null ? verticalTextOffset.getInput() : 0.0;
+        double horizontalPadding = backgroundWidthPadding != null ? backgroundWidthPadding.getInput() : ROW_HORIZONTAL_PADDING;
+        double backgroundHeightPaddingValue = backgroundHeightPadding != null ? backgroundHeightPadding.getInput() : ROW_VERTICAL_PADDING * 2.0;
+        double rowGap = moduleSpacing != null ? moduleSpacing.getInput() : ROW_GAP;
+        double colorOffset = 0.0;
+        double fontHeight = fontRenderer.height();
+        double backgroundHeight = Math.round(fontHeight + backgroundHeightPaddingValue);
+
+        for (HudEntry entry : entries) {
+            String fullText = entry.getFullText();
+            double textWidth = fontRenderer.width(fullText);
+            double textX = alignRight.isToggled() ? hudX - textWidth + horizontalOffset : hudX - horizontalOffset;
+            double backgroundX = textX - horizontalPadding;
+            double backgroundWidth = textWidth + horizontalPadding * 2.0;
+            double backgroundY = currentY;
+            double textY = backgroundY + ((backgroundHeight - fontHeight) / 2.0) - verticalOffset;
+            double sidebarX = alignRight.isToggled() ? backgroundX + backgroundWidth + 1.5 : backgroundX - 3.0;
+
+            rows.add(new HudRow(entry.primaryText, entry.secondaryText, backgroundX, backgroundY, backgroundWidth, backgroundHeight, textX, textY, sidebarX, colorOffset));
+
+            colorOffset += theme.getInput() == 0 ? -120.0 : -12.0;
+            currentY += backgroundHeight + rowGap;
+        }
+
+        return rows;
+    }
+
+    private void drawHudRows(@NotNull List<HudRow> rows, double bgOpacity, boolean drawShadow) {
+        for (HudRow row : rows) {
+            if (drawShadow) {
+                int shadowAlpha = clampAlpha((bgOpacity * 0.45) + 10.0);
+                RenderUtils.drawBloomShadow(
+                        (float) row.backgroundX,
+                        (float) row.backgroundY,
+                        (float) row.backgroundWidth,
+                        (float) row.backgroundHeight,
+                        10,
+                        (int) getHudRowRadius(row),
+                        new Color(0, 0, 0, shadowAlpha).getRGB(),
+                        true
+                );
+            }
+
+            int[] fillColors = getHudBackgroundColors(row.colorOffset, bgOpacity);
+            RenderUtils.drawRoundedGradientRect(
+                    (float) row.backgroundX,
+                    (float) row.backgroundY,
+                    (float) (row.backgroundX + row.backgroundWidth),
+                    (float) (row.backgroundY + row.backgroundHeight),
+                    getHudRowRadius(row),
+                    fillColors[0],
+                    fillColors[1],
+                    fillColors[1],
+                    fillColors[0]
+            );
+        }
+    }
+
+    private void drawHudRowForeground(@NotNull List<HudRow> rows) {
+        IFont fontRenderer = getFontRenderer();
+
+        for (HudRow row : rows) {
+            int textColor = Theme.getGradient((int) theme.getInput(), row.colorOffset);
+
+            if (sidebar.isToggled()) {
+                Color accent = new Color(textColor, true);
+                int sidebarColor = new Color(accent.getRed(), accent.getGreen(), accent.getBlue(), 210).getRGB();
+                RenderUtils.drawRoundedRectangle(
+                        (float) row.sidebarX,
+                        (float) (row.backgroundY + 1.5),
+                        (float) (row.sidebarX + 2.0),
+                        (float) (row.backgroundY + row.backgroundHeight - 1.5),
+                        1.5f,
+                        sidebarColor
+                );
+            }
+
+            fontRenderer.drawString(row.primaryText, row.textX, row.textY, textColor, dropShadow.isToggled());
+            if (!row.secondaryText.isEmpty()) {
+                double infoX = row.textX + fontRenderer.width(row.primaryText + " ");
+                drawHudInfoText(fontRenderer, row.secondaryText, infoX, row.textY, dropShadow.isToggled());
+            }
+        }
+    }
+
+    private int[] getHudBackgroundColors(double colorOffset, double bgOpacity) {
+        Color leftTheme = new Color(Theme.getGradient((int) theme.getInput(), colorOffset), true);
+        Color rightTheme = new Color(Theme.getGradient((int) theme.getInput(), colorOffset - 18.0), true);
+        Color leftFill = ColorUtils.blend(leftTheme, new Color(24, 27, 36), 0.25);
+        Color rightFill = ColorUtils.blend(rightTheme, new Color(12, 15, 22), 0.22);
+        int alpha = clampAlpha(bgOpacity);
+
+        return new int[]{
+                new Color(leftFill.getRed(), leftFill.getGreen(), leftFill.getBlue(), alpha).getRGB(),
+                new Color(rightFill.getRed(), rightFill.getGreen(), rightFill.getBlue(), alpha).getRGB()
+        };
+    }
+
+    private static float getHudRowRadius(@NotNull HudRow row) {
+        return (float) Math.max(4.0, Math.min(10.0, row.backgroundHeight / 2.0));
+    }
+
+    private static int clampAlpha(double alpha) {
+        return Math.max(0, Math.min(255, (int) Math.round(alpha)));
+    }
+
+    private static void drawHudInfoText(@NotNull IFont fontRenderer, @NotNull String infoText, double x, double y, boolean shadow) {
+        int shadowColor = INFO_SHADOW_SWAP_BASE_COLOR;
+        int textColor = getShadowColor(shadowColor);
+
+        if (shadow) {
+            fontRenderer.drawString(infoText, x + 1, y + 1, shadowColor, false);
+        }
+        fontRenderer.drawString(infoText, x, y, textColor, false);
+    }
+
+    private static int getShadowColor(int color) {
+        return (color & 0xFCFCFC) >> 2 | color & 0xFF000000;
+    }
+
+    private static final class HudRow {
+        private final String primaryText;
+        private final String secondaryText;
+        private final double backgroundX;
+        private final double backgroundY;
+        private final double backgroundWidth;
+        private final double backgroundHeight;
+        private final double textX;
+        private final double textY;
+        private final double sidebarX;
+        private final double colorOffset;
+
+        private HudRow(String primaryText, String secondaryText, double backgroundX, double backgroundY, double backgroundWidth, double backgroundHeight, double textX, double textY, double sidebarX, double colorOffset) {
+            this.primaryText = primaryText;
+            this.secondaryText = secondaryText;
+            this.backgroundX = backgroundX;
+            this.backgroundY = backgroundY;
+            this.backgroundWidth = backgroundWidth;
+            this.backgroundHeight = backgroundHeight;
+            this.textX = textX;
+            this.textY = textY;
+            this.sidebarX = sidebarX;
+            this.colorOffset = colorOffset;
+        }
+    }
+
     @NotNull
-    private List<String> getDrawTexts() {
+    private List<HudEntry> getDrawEntries() {
         List<Module> modules = ModuleManager.organizedModules;
-        List<String> texts = new ArrayList<>(modules.size());
+        List<HudEntry> entries = new ArrayList<>(modules.size());
 
         for (Module module : modules) {
             if (isIgnored(module)) continue;
-
-            String text = module.getPrettyName();
-            if (showInfo.isToggled() && !module.getPrettyInfo().isEmpty()) {
-                text += " §7" + module.getPrettyInfo();
-            }
-            if (lowercase.isToggled()) {
-                text = text.toLowerCase();
-            }
-            texts.add(text);
+            entries.add(getHudEntry(module));
         }
-        return texts;
+        return entries;
+    }
+
+    private static @NotNull HudEntry getHudEntry(@NotNull Module module) {
+        String primaryText = module.getPrettyName();
+        String secondaryText = "";
+
+        if (showInfo.isToggled() && !module.getPrettyInfo().isEmpty()) {
+            secondaryText = module.getPrettyInfo();
+        }
+        if (lowercase.isToggled()) {
+            primaryText = primaryText.toLowerCase();
+            secondaryText = secondaryText.toLowerCase();
+        }
+
+        return new HudEntry(primaryText, secondaryText);
     }
 
     public static double getLongestModule(IFont fr) {
@@ -334,13 +381,7 @@ public class HUD extends Module {
 
         for (Module module : ModuleManager.organizedModules) {
             if (module.isEnabled()) {
-                String moduleName = module.getPrettyName();
-                if (showInfo.isToggled() && !module.getInfo().isEmpty()) {
-                    moduleName += " §7" + module.getInfo();
-                }
-                if (lowercase.isToggled()) {
-                    moduleName = moduleName.toLowerCase();
-                }
+                String moduleName = getHudEntry(module).getFullText();
                 if (fr.width(moduleName) > length) {
                     length = fr.width(moduleName);
                 }
@@ -446,13 +487,8 @@ public class HUD extends Module {
                 for (Module module : ModuleManager.organizedModules) {
                     if (isIgnored(module)) continue;
 
-                    String moduleName = module.getPrettyName();
-                    if (showInfo.isToggled() && !module.getInfo().isEmpty()) {
-                        moduleName += " §7" + module.getInfo();
-                    }
-                    if (lowercase.isToggled()) {
-                        moduleName = moduleName.toLowerCase();
-                    }
+                    HudEntry entry = getHudEntry(module);
+                    String moduleName = entry.getFullText();
                     int e = Theme.getGradient((int) theme.getInput(), n2);
                     if (theme.getInput() == 0) {
                         n2 -= 120;
@@ -464,7 +500,11 @@ public class HUD extends Module {
                     if (alignRight.isToggled()) {
                         n3 -= getFontRenderer().width(moduleName);
                     }
-                    getFontRenderer().drawString(moduleName, n3, (float) n, e, dropShadow.isToggled());
+                    getFontRenderer().drawString(entry.primaryText, n3, (float) n, e, dropShadow.isToggled());
+                    if (!entry.secondaryText.isEmpty()) {
+                        double infoX = n3 + getFontRenderer().width(entry.primaryText + " ");
+                        drawHudInfoText(getFontRenderer(), entry.secondaryText, infoX, n, dropShadow.isToggled());
+                    }
                     n += Math.round(getFontRenderer().height() + 2);
                 }
                 return new double[]{this.miX + longestModule, n, this.miX - longestModule};
@@ -610,6 +650,20 @@ public class HUD extends Module {
                 return FontManager.regular22;
             case 3:
                 return FontManager.tenacity20;
+        }
+    }
+
+    private static final class HudEntry {
+        private final String primaryText;
+        private final String secondaryText;
+
+        private HudEntry(String primaryText, String secondaryText) {
+            this.primaryText = primaryText;
+            this.secondaryText = secondaryText;
+        }
+
+        private @NotNull String getFullText() {
+            return secondaryText.isEmpty() ? primaryText : primaryText + " " + secondaryText;
         }
     }
 }

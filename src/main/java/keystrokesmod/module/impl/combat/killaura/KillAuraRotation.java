@@ -24,6 +24,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class KillAuraRotation {
+    private static final float ADVANCED_FAST_TURN_TOTAL = 28.0f;
+    private static final float ADVANCED_FAST_TURN_YAW = 24.0f;
+    private static final float ADVANCED_FAST_TURN_PITCH = 16.0f;
     private final KillAura parent;
     private final Minecraft mc = Minecraft.getMinecraft();
     
@@ -46,14 +49,12 @@ public class KillAuraRotation {
     private float lastYaw;
     private float lastPitch;
     
-    // Smooth deceleration
+    // Shared step-shaping state for Advanced smoothing/bypass guards
     private float lastValidTargetYaw = 0.0f;
     private float lastValidTargetPitch = 0.0f;
     private boolean hasValidTarget = false;
     private float yawVelocity = 0.0f;
     private float pitchVelocity = 0.0f;
-    private long lastUpdateTime = 0L;
-    // General mode smoothing helpers
     private float generalYawCarry = 0.0f;
     private float generalPitchCarry = 0.0f;
     private boolean grimReady = false;
@@ -104,8 +105,8 @@ public class KillAuraRotation {
     public void onDisable() {
         rotationEnhancer.reset();
         
-        // If disabling and we have modified rotations (e.g. +36000), ensure we snap back cleanly
-        // to a valid client rotation to prevent flagging on the next packet.
+        // If disabling after using a silent modulo-continuity yaw, snap internal state back
+        // to the client's real rotation so we do not reuse an extended yaw value later.
         // However, simply resetting state here doesn't update the player's yaw/pitch field immediately.
         // The module's onDisable method should handle syncing the client player rotation if needed.
         // Here we just reset internal tracking.
@@ -126,7 +127,6 @@ public class KillAuraRotation {
         overshootTicks = 0;
         yawVelocity = 0.0f;
         pitchVelocity = 0.0f;
-        lastUpdateTime = 0L;
         generalYawCarry = 0.0f;
         generalPitchCarry = 0.0f;
         grimReady = false;
@@ -173,15 +173,11 @@ public class KillAuraRotation {
     public float[] getRotations(EntityLivingBase target) {
         // Select rotation algorithm
         int algo = parent.rotationAlgorithmMode != null ? (int) parent.rotationAlgorithmMode.getInput() : 0;
-        if (algo == 1) {
+        if (algo == KillAura.ROTATION_ALGORITHM_V2) {
             return getRotationsV2(target);
-        } else if (algo == 2) {
-            return getRotationsInertia(target);
-        } else if (algo == 3) {
+        } else if (algo == KillAura.ROTATION_ALGORITHM_GRIM) {
             return getRotationsGrim(target);
-        } else if (algo == 4) {
-            return getRotationsGeneralAdaptive(target);
-        } else if (algo == 5) {
+        } else if (algo == KillAura.ROTATION_ALGORITHM_ADVANCED) {
             return getRotationsAdvanced(target);
         }
         return getRotationsClassic(target);
@@ -424,142 +420,6 @@ public class KillAuraRotation {
     }
     
     /**
-     * Inertia-based rotation algorithm - accelerates toward target and decelerates using friction.
-     */
-    private float[] getRotationsInertia(EntityLivingBase target) {
-        long now = System.currentTimeMillis();
-        if (lastUpdateTime == 0L) {
-            lastUpdateTime = now;
-        }
-        float deltaTicks = Math.max(0.5f, Math.min(2.5f, (now - lastUpdateTime) / 50.0f));
-        lastUpdateTime = now;
-        
-        boolean useNearestFromType = parent.v2RotationType != null && parent.v2RotationType.getInput() == 1;
-        boolean useNearestSetting = parent.v2Nearest != null && parent.v2Nearest.isToggled();
-        boolean useNearest = useNearestFromType || useNearestSetting;
-        double nearestAcc = parent.nearestAccuracy != null ? parent.nearestAccuracy.getInput() : 1.0;
-        aimSimulator.setNearest(useNearest, nearestAcc);
-        
-        boolean useLazy = parent.v2Lazy != null && parent.v2Lazy.isToggled();
-        double lazyAcc = parent.lazyAccuracy != null ? parent.lazyAccuracy.getInput() : 0.95;
-        aimSimulator.setLazy(useLazy, lazyAcc);
-        
-        final int prMode = parent.pointRandomizationMode != null ? (int) parent.pointRandomizationMode.getInput() : 0;
-        boolean hasTarget = target != null && !target.isDead;
-        final boolean allowJitter = shouldAllowJitter(target);
-        aimSimulator.setJitterAllowed(allowJitter);
-
-        boolean enableNoise = prMode != 0 && parent.v2Noise != null && parent.v2Noise.isToggled();
-        if (!allowJitter) enableNoise = false;
-        
-        float noiseMultiplier = 1.0f;
-        if (enableNoise && parent.noiseRangeDecrease != null && parent.noiseRangeDecrease.isToggled() && target != null) {
-            double distance = mc.thePlayer.getDistanceToEntity(target);
-            double threshold = parent.noiseRangeDecreaseThreshold.getInput();
-            double disableRange = parent.noiseRangeDecreaseDisable.getInput();
-            
-            if (distance <= disableRange) {
-                enableNoise = false;
-            } else if (distance < threshold) {
-                double range = threshold - disableRange;
-                if (range > 0) {
-                    noiseMultiplier = (float) ((distance - disableRange) / range);
-                    noiseMultiplier = Math.max(0.0f, Math.min(1.0f, noiseMultiplier));
-                }
-            }
-        }
-        
-        float horizontalNoise = parent.noiseHorizontal != null ? (float) parent.noiseHorizontal.getInput() * noiseMultiplier : 0.35f * noiseMultiplier;
-        float verticalNoise = parent.noiseVertical != null ? (float) parent.noiseVertical.getInput() * noiseMultiplier : 0.5f * noiseMultiplier;
-        
-        aimSimulator.setNoise(enableNoise,
-                new Pair<>(horizontalNoise, verticalNoise),
-                parent.noiseAimSpeed != null ? parent.noiseAimSpeed.getInput() : 0.35,
-                parent.noiseDelay != null ? (long) parent.noiseDelay.getInput() : 100);
-        
-        int mappedMode = prMode == 0 ? 2 : prMode;
-        aimSimulator.setPointRandomizationMode(allowJitter ? mappedMode : 0);
-        
-        boolean useDelayAim = parent.v2DelayAim != null && parent.v2DelayAim.isToggled();
-        int delayAimAmount = parent.delayAimAmount != null ? (int) parent.delayAimAmount.getInput() : 5;
-        aimSimulator.setDelay(useDelayAim, delayAimAmount);
-        
-        boolean shouldMaintainRotation = parent.v2Constant != null && parent.v2Constant.isToggled()
-                && !(parent.constantOnlyIfNotMoving != null && parent.constantOnlyIfNotMoving.isToggled() && (MoveUtil.isMoving() || MoveUtil.isMoving(target)));
-        
-        float desiredYaw;
-        float desiredPitch;
-        
-        if (hasTarget) {
-            Pair<Float, Float> result = aimSimulator.getRotation(target);
-            desiredYaw = result.first();
-            desiredPitch = result.second();
-            actualTargetYaw = desiredYaw;
-            actualTargetPitch = desiredPitch;
-            hasValidTarget = true;
-            lastValidTargetYaw = desiredYaw;
-            lastValidTargetPitch = desiredPitch;
-        } else if (hasValidTarget) {
-            desiredYaw = lastValidTargetYaw;
-            desiredPitch = lastValidTargetPitch;
-        } else {
-            desiredYaw = RotationHandler.getRotationYaw();
-            desiredPitch = RotationHandler.getRotationPitch();
-        }
-        
-        if (shouldMaintainRotation && hasValidTarget) {
-            desiredYaw = rotations[0];
-            desiredPitch = rotations[1];
-        }
-        
-        float yawDelta = RotationUtils.normalize(desiredYaw - rotations[0]);
-        float pitchDelta = desiredPitch - rotations[1];
-        
-        double deadZone = parent.inertiaDeadZone != null ? parent.inertiaDeadZone.getInput() : 0.0;
-        if (Math.abs(yawDelta) < deadZone) {
-            yawDelta = 0.0f;
-            yawVelocity *= Math.pow(parent.inertiaFriction != null ? parent.inertiaFriction.getInput() : 0.9, deltaTicks * 1.5f);
-        }
-        if (Math.abs(pitchDelta) < deadZone) {
-            pitchDelta = 0.0f;
-            pitchVelocity *= Math.pow(parent.inertiaFriction != null ? parent.inertiaFriction.getInput() : 0.9, deltaTicks * 1.5f);
-        }
-        
-        float acceleration = parent.inertiaAcceleration != null ? (float) parent.inertiaAcceleration.getInput() : 1.0f;
-        float maxSpeed = parent.inertiaMaxSpeed != null ? (float) parent.inertiaMaxSpeed.getInput() : 12.0f;
-        float friction = parent.inertiaFriction != null ? (float) parent.inertiaFriction.getInput() : 0.9f;
-        
-        float frictionFactor = (float) Math.pow(friction, deltaTicks);
-        yawVelocity *= frictionFactor;
-        pitchVelocity *= frictionFactor;
-        
-        float distanceScale = 1.0f;
-        if (hasTarget) {
-            double distance = mc.thePlayer.getDistanceToEntity(target);
-            distanceScale = (float) Math.max(0.7, Math.min(1.3, distance / 3.5));
-        } else {
-            distanceScale = 0.85f;
-        }
-        
-        yawVelocity += Math.signum(yawDelta) * acceleration * distanceScale * deltaTicks;
-        pitchVelocity += Math.signum(pitchDelta) * acceleration * 0.65f * distanceScale * deltaTicks;
-        
-        yawVelocity = Math.max(-maxSpeed, Math.min(maxSpeed, yawVelocity));
-        pitchVelocity = Math.max(-maxSpeed, Math.min(maxSpeed, pitchVelocity));
-        
-        float newYaw = rotations[0] + yawVelocity;
-        float newPitch = rotations[1] + pitchVelocity;
-        
-        float prevYaw = rotations[0];
-        float prevPitch = rotations[1];
-        float[] fixed = RotationUtils.fixRotation(newYaw, newPitch, prevYaw, prevPitch);
-        fixed = finalizeRotations(fixed, prevYaw, prevPitch, hasTarget, allowJitter);
-        rotations = fixed;
-        lastUpdateMs = System.currentTimeMillis();
-        return rotations;
-    }
-
-    /**
      * Grim-oriented rotation builder: simulate mouse deltas with sensitivity GCD,
      * simple acceleration, and per-tick clamping to keep deltas within
      * human-like bounds. This avoids smooth math noise and favors discrete steps.
@@ -624,7 +484,11 @@ public class KillAuraRotation {
             quantizedPitch = 0f;
         }
 
-        rotations[0] = MathHelper.wrapAngleTo180_float(currentYaw + quantizedYaw);
+        float nextYaw = currentYaw + quantizedYaw;
+        if (parent.rotationMode == null || parent.rotationMode.getInput() != 1) {
+            nextYaw = MathHelper.wrapAngleTo180_float(nextYaw);
+        }
+        rotations[0] = nextYaw;
         rotations[1] = MathHelper.clamp_float(currentPitch + quantizedPitch, -90f, 90f);
 
         // Keep Grim behavior untouched; General mode applies its own tweaks separately.
@@ -638,6 +502,7 @@ public class KillAuraRotation {
         }
 
         rotations = finalizeRotations(rotations, prevYaw, prevPitch, hasTarget, allowJitter);
+        rotations = applyGrimModuloBypass(rotations, prevYaw, hasTarget);
 
         lastGrimYaw = rotations[0];
         lastGrimPitch = rotations[1];
@@ -647,125 +512,6 @@ public class KillAuraRotation {
         return rotations;
     }
 
-    /**
-     * General (adaptive) rotation algorithm:
-     * - Uses AimSimulator noise/lead with anti-pattern shaping
-     * - Mouse GCD quantization with soft caps to avoid MX distinct/entropy and AGC aim assists
-     * - Small modulo bypass to avoid large yaw jumps
-     */
-    private float[] getRotationsGeneralAdaptive(EntityLivingBase target) {
-        boolean hasTarget = target != null && !target.isDead;
-        boolean allowJitter = shouldAllowJitter(target);
-        aimSimulator.setJitterAllowed(allowJitter);
-        rotationEnhancer.setJitterAllowed(allowJitter);
-        // Configure AimSimulator with stronger anti-detection shaping already present in AimSimulator
-        boolean useNearest = (parent.v2Nearest != null && parent.v2Nearest.isToggled()) || (parent.v2RotationType != null && parent.v2RotationType.getInput() == 1);
-        double nearestAcc = parent.nearestAccuracy != null ? parent.nearestAccuracy.getInput() : 1.0;
-        aimSimulator.setNearest(useNearest, nearestAcc);
-
-        boolean useLazy = parent.v2Lazy != null && parent.v2Lazy.isToggled();
-        double lazyAcc = parent.lazyAccuracy != null ? parent.lazyAccuracy.getInput() : 0.95;
-        aimSimulator.setLazy(useLazy, lazyAcc);
-
-        // Toggle point randomization mode smoothly to avoid long runs of identical buckets
-        int prModeSetting = parent.pointRandomizationMode != null ? (int) parent.pointRandomizationMode.getInput() : 0;
-        int prMode = prModeSetting == 0 ? 3 : prModeSetting; // default to smooth when off
-        int effectivePrMode = allowJitter ? prMode : 0;
-        boolean enableNoise = prModeSetting != 0 && parent.v2Noise != null && parent.v2Noise.isToggled();
-        if (!allowJitter) enableNoise = false;
-
-        float noiseMultiplier = 1.0f;
-        if (enableNoise && parent.noiseRangeDecrease != null && parent.noiseRangeDecrease.isToggled() && hasTarget) {
-            double distance = mc.thePlayer.getDistanceToEntity(target);
-            double threshold = parent.noiseRangeDecreaseThreshold.getInput();
-            double disableRange = parent.noiseRangeDecreaseDisable.getInput();
-            if (distance <= disableRange) {
-                enableNoise = false;
-            } else if (distance < threshold) {
-                double range = threshold - disableRange;
-                if (range > 0) {
-                    noiseMultiplier = (float) ((distance - disableRange) / range);
-                    noiseMultiplier = Math.max(0.0f, Math.min(1.0f, noiseMultiplier));
-                }
-            }
-        }
-
-        float horizontalNoise = parent.noiseHorizontal != null ? (float) parent.noiseHorizontal.getInput() * noiseMultiplier : 0.35f * noiseMultiplier;
-        float verticalNoise = parent.noiseVertical != null ? (float) parent.noiseVertical.getInput() * noiseMultiplier : 0.5f * noiseMultiplier;
-        aimSimulator.setNoise(enableNoise,
-                new Pair<>(horizontalNoise, verticalNoise),
-                parent.noiseAimSpeed != null ? parent.noiseAimSpeed.getInput() : 0.35,
-                parent.noiseDelay != null ? (long) parent.noiseDelay.getInput() : 100);
-        aimSimulator.setPointRandomizationMode(effectivePrMode); // default already smoothed above
-
-        boolean useDelayAim = parent.v2DelayAim != null && parent.v2DelayAim.isToggled();
-        int delayAimAmount = parent.delayAimAmount != null ? (int) parent.delayAimAmount.getInput() : 5;
-        aimSimulator.setDelay(useDelayAim, delayAimAmount);
-
-        Pair<Float, Float> res = hasTarget ? aimSimulator.getRotation(target) : new Pair<>(RotationHandler.getRotationYaw(), RotationHandler.getRotationPitch());
-        float targetYaw = res.first();
-        float targetPitch = res.second();
-
-        // Adaptive smoothing using RotationEnhancer
-        float baseSpeed = hasTarget ? 6.0f : 3.5f;
-        if (allowJitter) {
-            baseSpeed *= (float) (0.9 + Math.random() * 0.25); // slight per-tick variance to break patterns
-        }
-        float[] enhanced = rotationEnhancer.enhanceRotation(
-                targetYaw, targetPitch,
-                rotations[0], rotations[1],
-                baseSpeed,
-                true
-        );
-        targetYaw = enhanced[0];
-        targetPitch = enhanced[1];
-
-        // Mouse-step quantization and soft caps to avoid clean lines
-        float yawDiff = RotationUtils.normalize(targetYaw - rotations[0]);
-        float pitchDiff = targetPitch - rotations[1];
-        float gcd = getMouseGCD();
-        float maxYawStep = 6.4f;
-        float maxPitchStep = 4.2f;
-
-        float stepYaw = MathHelper.clamp_float(yawDiff, -maxYawStep, maxYawStep);
-        float stepPitch = MathHelper.clamp_float(pitchDiff, -maxPitchStep, maxPitchStep);
-        // Slightly vary quantization window to avoid repetitive distinct buckets.
-        // IMPORTANT: we still re-align back to the real mouse GCD afterwards to avoid "sensitivity" flags.
-        float jitterGcd = allowJitter ? gcd * (float) (0.9 + Math.random() * 0.2) : gcd;
-        stepYaw = Math.round(stepYaw / jitterGcd) * jitterGcd;
-        stepPitch = Math.round(stepPitch / jitterGcd) * jitterGcd;
-
-        // Break perfect grid/0.1 patterns (AGC AimAssistB) and flat pitch (AimAssistC)
-        if (allowJitter) {
-            // Add only GCD-aligned micro variance (avoid sensitivity checks).
-            stepYaw += (Math.random() > 0.5 ? gcd : -gcd);
-        }
-        if (allowJitter && Math.abs(stepPitch) < 0.02f) {
-            // Keep pitch micro-movement on GCD grid too.
-            stepPitch = (Math.random() > 0.5 ? gcd : -gcd);
-        }
-
-        Pair<Float, Float> entropySteps = applyEntropyBypass(stepYaw, stepPitch, gcd, maxYawStep, maxPitchStep, allowJitter);
-        stepYaw = entropySteps.first();
-        stepPitch = entropySteps.second();
-        
-        // MX Invalid Pitch bypass: Sanitize tiny pitch deltas
-        if (Math.abs(stepPitch) < 1e-4f && Math.abs(stepPitch) > 0) {
-            stepPitch = 0f;
-        }
-
-        float newYaw = MathHelper.wrapAngleTo180_float(rotations[0] + stepYaw);
-        float newPitch = MathHelper.clamp_float(rotations[1] + stepPitch, -90f, 90f);
-
-        float prevYaw = rotations[0];
-        float prevPitch = rotations[1];
-        float[] fixed = RotationUtils.fixRotation(newYaw, newPitch, prevYaw, prevPitch);
-        fixed = finalizeRotations(fixed, prevYaw, prevPitch, hasTarget, allowJitter);
-        rotations = fixed;
-        lastUpdateMs = System.currentTimeMillis();
-        return rotations;
-    }
-    
     /**
      * Advanced rotation algorithm with comprehensive anti-detection features.
      * Designed to bypass MX (AimComplex, AimAnalysis, AimStatistics, AimConstant, AimFactor, AimSmooth)
@@ -881,9 +627,6 @@ public class KillAuraRotation {
         float effectiveSmoothing = smoothingBase + (float) (Math.random() - 0.5) * smoothingVar * 2;
         effectiveSmoothing = Math.max(0.1f, Math.min(1.0f, effectiveSmoothing));
         
-        float yawDiff = RotationUtils.normalize(targetYaw - rotations[0]);
-        float pitchDiff = targetPitch - rotations[1];
-        
         // Apply yaw/pitch ratio (makes movement more human-like)
         float yawSpeed = 5.0f + (float) (Math.random() * 2.0);
         float pitchSpeed = yawSpeed / yawPitchRatio;
@@ -895,6 +638,28 @@ public class KillAuraRotation {
             yawSpeed *= combatMult;
             pitchSpeed *= combatMult;
         }
+
+        float rawYawDiff = RotationUtils.normalize(targetYaw - rotations[0]);
+        float rawPitchDiff = targetPitch - rotations[1];
+        float rawTurnDistance = (float) Math.sqrt(rawYawDiff * rawYawDiff + rawPitchDiff * rawPitchDiff);
+        boolean directLargeTurn = hasTarget && shouldUseAdvancedFastTurn(rawYawDiff, rawPitchDiff, rawTurnDistance);
+
+        // Large retargets should head straight for the selected aim point instead of
+        // stacking enhancer interpolation on top of step shaping.
+        if (!directLargeTurn) {
+            float curveSpeed = Math.max(2.2f, (yawSpeed + pitchSpeed) * 0.55f);
+            float[] curvedTarget = rotationEnhancer.enhanceRotation(
+                    targetYaw, targetPitch,
+                    rotations[0], rotations[1],
+                    curveSpeed,
+                    true
+            );
+            targetYaw = curvedTarget[0];
+            targetPitch = curvedTarget[1];
+        }
+
+        float yawDiff = RotationUtils.normalize(targetYaw - rotations[0]);
+        float pitchDiff = targetPitch - rotations[1];
         
         // === GCD & Sensitivity Simulation ===
         int gcdMode = parent.advGcdMode != null ? (int) parent.advGcdMode.getInput() : 3;
@@ -920,22 +685,24 @@ public class KillAuraRotation {
         }
         
         // Calculate step sizes
-        float maxYawStep = 7.0f;
-        float maxPitchStep = 4.5f;
+        float maxYawStep = directLargeTurn ? 8.5f : 7.0f;
+        float maxPitchStep = directLargeTurn ? 5.25f : 4.5f;
         
-        float stepYaw = MathHelper.clamp_float(yawDiff * effectiveSmoothing, -maxYawStep, maxYawStep);
-        float stepPitch = MathHelper.clamp_float(pitchDiff * effectiveSmoothing / yawPitchRatio, -maxPitchStep, maxPitchStep);
+        Pair<Float, Float> shapedSteps = buildAdvancedStepProfile(
+                yawDiff, pitchDiff,
+                gcd,
+                maxYawStep, maxPitchStep,
+                effectiveSmoothing,
+                acceleration,
+                yawPitchRatio,
+                allowJitter,
+                directLargeTurn
+        );
+        float stepYaw = shapedSteps.first();
+        float stepPitch = shapedSteps.second();
         
         // === Anti-Detection Bypasses ===
-        
-        // Entropy Bypass (MX AimComplexCheck)
-        if (parent.advEntropyBypass != null && parent.advEntropyBypass.isToggled() && allowJitter) {
-            float entropyVar = parent.advEntropyVariance != null ? (float) parent.advEntropyVariance.getInput() : 0.12f;
-            Pair<Float, Float> entropySteps = applyAdvancedEntropyBypass(stepYaw, stepPitch, gcd, maxYawStep, maxPitchStep, entropyVar);
-            stepYaw = entropySteps.first();
-            stepPitch = entropySteps.second();
-        }
-        
+
         // Strafe Desync (Intave Heuristics pattern 51)
         if (parent.advStrafeDesync != null && parent.advStrafeDesync.isToggled() && allowJitter) {
             float desyncChance = parent.advStrafeDesyncChance != null ? (float) parent.advStrafeDesyncChance.getInput() : 30f;
@@ -948,7 +715,7 @@ public class KillAuraRotation {
         }
         
         // Factor Bypass (MX AimFactorCheck - small-big-small patterns)
-        if (parent.advFactorBypass != null && parent.advFactorBypass.isToggled() && allowJitter) {
+        if (!directLargeTurn && parent.advFactorBypass != null && parent.advFactorBypass.isToggled() && allowJitter) {
             // Prevent small-big-small patterns
             float absStep = Math.abs(stepYaw);
             float absLastStep = Math.abs(entropyLastYawStep);
@@ -960,7 +727,7 @@ public class KillAuraRotation {
         
         // Constant Bypass (MX AimConstantCheck)
         if (parent.advConstantBypass != null && parent.advConstantBypass.isToggled()) {
-            Pair<Float, Float> constantSteps = applyConstantBypass(stepYaw, stepPitch, gcd, maxYawStep, maxPitchStep);
+            Pair<Float, Float> constantSteps = applyConstantBypass(stepYaw, stepPitch, gcd, maxYawStep, maxPitchStep, directLargeTurn);
             stepYaw = constantSteps.first();
             stepPitch = constantSteps.second();
         }
@@ -1015,22 +782,30 @@ public class KillAuraRotation {
                 }
             }
         }
+
+        // Entropy Bypass (MX AimComplexCheck)
+        if (!directLargeTurn && parent.advEntropyBypass != null && parent.advEntropyBypass.isToggled()) {
+            float entropyVar = parent.advEntropyVariance != null ? (float) parent.advEntropyVariance.getInput() : 0.12f;
+            Pair<Float, Float> entropySteps = applyAdvancedEntropyBypass(stepYaw, stepPitch, gcd, maxYawStep, maxPitchStep, entropyVar);
+            stepYaw = entropySteps.first();
+            stepPitch = entropySteps.second();
+        }
+
+        Pair<Float, Float> continuitySteps = applyAimHContinuityGuard(
+                stepYaw, stepPitch,
+                yawDiff, pitchDiff,
+                gcd,
+                maxYawStep, maxPitchStep,
+                allowJitter,
+                directLargeTurn
+        );
+        stepYaw = continuitySteps.first();
+        stepPitch = continuitySteps.second();
         
         // Quantize to GCD
         if (gcdMode >= 1) {
             stepYaw = Math.round(stepYaw / gcd) * gcd;
             stepPitch = Math.round(stepPitch / gcd) * gcd;
-        }
-        
-        // Modulo Bypass (avoid 360 edge)
-        if (parent.advModuloBypass != null && parent.advModuloBypass.isToggled()) {
-            float newYaw = rotations[0] + stepYaw;
-            if (Math.abs(newYaw) > 270f && parent.rotationMode != null && parent.rotationMode.getInput() == 1) {
-                float offset = 720f;
-                float sign = newYaw == 0 ? 1f : Math.signum(newYaw);
-                newYaw += sign * offset;
-                stepYaw = newYaw - rotations[0];
-            }
         }
         
         // === Apply Rotation ===
@@ -1040,20 +815,29 @@ public class KillAuraRotation {
             stepPitch = 0f; // Snap to zero to avoid denormal values
         }
         
-        float newYaw = MathHelper.wrapAngleTo180_float(rotations[0] + stepYaw);
+        float newYaw = rotations[0] + stepYaw;
+        if (parent.rotationMode == null || parent.rotationMode.getInput() != 1) {
+            newYaw = MathHelper.wrapAngleTo180_float(newYaw);
+        }
         float newPitch = MathHelper.clamp_float(rotations[1] + stepPitch, -90f, 90f);
         
         float prevYaw = rotations[0];
         float prevPitch = rotations[1];
         float[] fixed = RotationUtils.fixRotation(newYaw, newPitch, prevYaw, prevPitch);
         fixed = finalizeRotations(fixed, prevYaw, prevPitch, hasTarget, allowJitter);
-        
-        // Update state
-        entropyLastYawStep = stepYaw;
-        entropyLastPitchStep = stepPitch;
-        entropyTick++;
+        fixed = applyAdvancedModuloBypass(fixed, prevYaw, hasTarget);
         
         rotations = fixed;
+        if (!hasTarget) {
+            yawVelocity = 0.0f;
+            pitchVelocity = 0.0f;
+            generalYawCarry = 0.0f;
+            generalPitchCarry = 0.0f;
+        } else if (parent.advEntropyBypass == null || !parent.advEntropyBypass.isToggled()) {
+            entropyLastYawStep = stepYaw;
+            entropyLastPitchStep = stepPitch;
+            entropyTick++;
+        }
         lastUpdateMs = System.currentTimeMillis();
         return rotations;
     }
@@ -1114,270 +898,199 @@ public class KillAuraRotation {
         
         return new Pair<>(MathHelper.wrapAngleTo180_float(yaw), MathHelper.clamp_float(pitch, -90f, 90f));
     }
+
+    private Pair<Float, Float> buildAdvancedStepProfile(float yawDiff, float pitchDiff, float gcd,
+                                                        float maxYawStep, float maxPitchStep,
+                                                        float smoothing, float acceleration,
+                                                        float yawPitchRatio, boolean allowJitter,
+                                                        boolean directLargeTurn) {
+        float desiredYawStep = directLargeTurn
+                ? Math.copySign(Math.min(Math.abs(yawDiff), maxYawStep), yawDiff)
+                : curvedStep(yawDiff, maxYawStep, smoothing);
+        float pitchRatio = directLargeTurn ? Math.max(1.35f, yawPitchRatio * 1.1f) : yawPitchRatio;
+        float desiredPitchStep = directLargeTurn
+                ? Math.copySign(Math.min(Math.abs(pitchDiff / pitchRatio), maxPitchStep), pitchDiff)
+                : curvedStep(pitchDiff / pitchRatio, maxPitchStep, smoothing);
+
+        float carryBlend = directLargeTurn ? 0.18f : 0.45f;
+        float carryStore = directLargeTurn ? 0.32f : 0.6f;
+
+        desiredYawStep = MathHelper.clamp_float(desiredYawStep + generalYawCarry * carryBlend, -maxYawStep, maxYawStep);
+        desiredPitchStep = MathHelper.clamp_float(desiredPitchStep + generalPitchCarry * carryBlend, -maxPitchStep, maxPitchStep);
+
+        generalYawCarry = MathHelper.clamp_float((yawDiff - desiredYawStep) * carryStore, -maxYawStep, maxYawStep);
+        generalPitchCarry = MathHelper.clamp_float((pitchDiff - desiredPitchStep) * carryStore, -maxPitchStep, maxPitchStep);
+
+        float yawDistanceFactor = Math.min(1.0f, Math.abs(yawDiff) / Math.max(maxYawStep * 1.75f, 1.0f));
+        float pitchDistanceFactor = Math.min(1.0f, Math.abs(pitchDiff) / Math.max(maxPitchStep * 1.75f, 1.0f));
+        float yawAcceleration = Math.max(gcd * 2.8f, maxYawStep * (0.30f + acceleration * 0.28f + yawDistanceFactor * 0.26f));
+        float pitchAcceleration = Math.max(gcd * 2.2f, maxPitchStep * (0.26f + acceleration * 0.22f + pitchDistanceFactor * 0.20f));
+
+        if (Math.abs(yawDiff) > maxYawStep * 1.2f) {
+            float launchYaw = Math.copySign(Math.min(maxYawStep * (0.58f + yawDistanceFactor * 0.18f), Math.abs(desiredYawStep)), desiredYawStep);
+            if (Math.abs(yawVelocity) < Math.abs(launchYaw)) {
+                yawVelocity = launchYaw;
+            }
+        }
+        if (Math.abs(pitchDiff) > maxPitchStep * 1.1f) {
+            float launchPitch = Math.copySign(Math.min(maxPitchStep * (0.50f + pitchDistanceFactor * 0.16f), Math.abs(desiredPitchStep)), desiredPitchStep);
+            if (Math.abs(pitchVelocity) < Math.abs(launchPitch)) {
+                pitchVelocity = launchPitch;
+            }
+        }
+
+        yawVelocity = moveTowards(yawVelocity, desiredYawStep, yawAcceleration);
+        pitchVelocity = moveTowards(pitchVelocity, desiredPitchStep, pitchAcceleration);
+
+        float damping = directLargeTurn ? (allowJitter ? 0.97f : 0.92f) : (allowJitter ? 0.92f : 0.86f);
+        yawVelocity *= damping;
+        pitchVelocity *= damping;
+
+        float shapedYaw = MathHelper.clamp_float(yawVelocity, -maxYawStep, maxYawStep);
+        float shapedPitch = MathHelper.clamp_float(pitchVelocity, -maxPitchStep, maxPitchStep);
+
+        if (!directLargeTurn && allowJitter && Math.abs(shapedYaw) >= 2.4f && Math.abs(shapedPitch) < gcd * 0.75f) {
+            float pitchFloor = Math.max(gcd, 0.12f);
+            float pitchSign = Math.abs(pitchDiff) > 1.0E-4f ? Math.signum(pitchDiff) : (entropySkewFlip ? 1f : -1f);
+            shapedPitch = Math.copySign(pitchFloor, pitchSign);
+        }
+
+        return new Pair<>(shapedYaw, shapedPitch);
+    }
+
+    private Pair<Float, Float> applyAimHContinuityGuard(float stepYaw, float stepPitch,
+                                                        float yawDiff, float pitchDiff,
+                                                        float gcd,
+                                                        float maxYawStep, float maxPitchStep,
+                                                        boolean allowJitter,
+                                                        boolean directLargeTurn) {
+        if (!allowJitter) {
+            return new Pair<>(MathHelper.clamp_float(stepYaw, -maxYawStep, maxYawStep),
+                    MathHelper.clamp_float(stepPitch, -maxPitchStep, maxPitchStep));
+        }
+
+        if (directLargeTurn) {
+            return new Pair<>(MathHelper.clamp_float(stepYaw, -maxYawStep, maxYawStep),
+                    MathHelper.clamp_float(stepPitch, -maxPitchStep, maxPitchStep));
+        }
+
+        float prevYaw = entropyLastYawStep;
+        float prevPitch = entropyLastPitchStep;
+        float prevSpeed = (float) Math.sqrt(prevYaw * prevYaw + prevPitch * prevPitch);
+        float currentSpeed = (float) Math.sqrt(stepYaw * stepYaw + stepPitch * stepPitch);
+
+        if (prevSpeed > gcd * 1.5f && currentSpeed > gcd * 1.5f) {
+            float dropLimit = Math.max(1.25f, prevSpeed * 0.4f);
+            if (prevSpeed - currentSpeed > dropLimit) {
+                float targetSpeed = prevSpeed - dropLimit;
+                float scale = targetSpeed / currentSpeed;
+                stepYaw *= scale;
+                stepPitch *= scale;
+                currentSpeed = targetSpeed;
+            }
+
+            float riseLimit = Math.max(1.6f, prevSpeed * 0.55f);
+            if (currentSpeed - prevSpeed > riseLimit) {
+                float targetSpeed = prevSpeed + riseLimit;
+                float scale = targetSpeed / currentSpeed;
+                stepYaw *= scale;
+                stepPitch *= scale;
+                currentSpeed = targetSpeed;
+            }
+
+            float angle = angleBetween(prevYaw, prevPitch, stepYaw, stepPitch);
+            if (angle > 2.35f) {
+                stepYaw = prevYaw + (stepYaw - prevYaw) * 0.45f;
+                stepPitch = prevPitch + (stepPitch - prevPitch) * 0.45f;
+            }
+        }
+
+        float pendingDistance = (float) Math.sqrt(yawDiff * yawDiff + pitchDiff * pitchDiff);
+        if (pendingDistance > 1.8f) {
+            float minFollowThrough = Math.max(gcd * 1.5f, 0.14f);
+            float adjustedSpeed = (float) Math.sqrt(stepYaw * stepYaw + stepPitch * stepPitch);
+            if (adjustedSpeed < minFollowThrough) {
+                float yawSign = Math.abs(yawDiff) > 1.0E-4f ? Math.signum(yawDiff) : (Math.abs(prevYaw) > 1.0E-4f ? Math.signum(prevYaw) : 1f);
+                stepYaw = yawSign * Math.max(gcd * 2.0f, 0.18f);
+                if (Math.abs(pitchDiff) > 0.12f) {
+                    stepPitch = Math.copySign(Math.max(gcd, 0.08f), pitchDiff);
+                }
+            }
+        }
+
+        return new Pair<>(MathHelper.clamp_float(stepYaw, -maxYawStep, maxYawStep),
+                MathHelper.clamp_float(stepPitch, -maxPitchStep, maxPitchStep));
+    }
+
+    private float curvedStep(float diff, float maxStep, float smoothing) {
+        float absDiff = Math.abs(diff);
+        if (absDiff < 1.0E-4f) {
+            return 0f;
+        }
+
+        float normalized = Math.min(1.0f, absDiff / Math.max(maxStep, 1.0E-4f));
+        float eased = normalized < 0.5f
+                ? 2.0f * normalized * normalized
+                : 1.0f - (float) Math.pow(-2.0f * normalized + 2.0f, 2.0) / 2.0f;
+        float response = Math.max(0.18f + smoothing * 0.12f, eased * (0.65f + smoothing * 0.35f));
+        float step = Math.min(absDiff, Math.min(maxStep, absDiff * response));
+        return Math.copySign(step, diff);
+    }
+
+    private float moveTowards(float current, float target, float maxDelta) {
+        if (current < target) {
+            return Math.min(current + maxDelta, target);
+        }
+        if (current > target) {
+            return Math.max(current - maxDelta, target);
+        }
+        return current;
+    }
+
+    private float angleBetween(float x1, float y1, float x2, float y2) {
+        double len1 = Math.sqrt(x1 * x1 + y1 * y1);
+        double len2 = Math.sqrt(x2 * x2 + y2 * y2);
+        if (len1 < 1.0E-4 || len2 < 1.0E-4) {
+            return 0f;
+        }
+        double dot = x1 * x2 + y1 * y2;
+        double cosine = Math.max(-1.0, Math.min(1.0, dot / (len1 * len2)));
+        return (float) Math.acos(cosine);
+    }
+
+    private boolean shouldUseAdvancedFastTurn(float yawDiff, float pitchDiff, float turnDistance) {
+        return turnDistance >= ADVANCED_FAST_TURN_TOTAL
+                || Math.abs(yawDiff) >= ADVANCED_FAST_TURN_YAW
+                || Math.abs(pitchDiff) >= ADVANCED_FAST_TURN_PITCH;
+    }
     
     /**
      * Advanced entropy bypass with configurable variance.
      */
     private Pair<Float, Float> applyAdvancedEntropyBypass(float stepYaw, float stepPitch, float gcd,
                                                           float maxYawStep, float maxPitchStep, float variance) {
-        // Add controlled variance to break entropy patterns
         float yawOut = stepYaw;
         float pitchOut = stepPitch;
-        
-        // Vary the step sizes to create different entropy signatures
-        if (entropyTick % 4 == 0) {
-            yawOut += (Math.random() - 0.5) * variance * gcd * 4;
+
+        if (Math.abs(yawOut) > gcd * 1.5f) {
+            yawOut += (float) ((Math.random() - 0.5) * variance * gcd * 2.0f);
         }
-        if (entropyTick % 6 == 0) {
-            pitchOut += (Math.random() - 0.5) * variance * gcd * 3;
+        if (Math.abs(pitchOut) > gcd) {
+            pitchOut += (float) ((Math.random() - 0.5) * variance * gcd * 1.4f);
         }
-        
-        // Ensure yaw and pitch have different entropy
-        if (entropyTick % 8 == 0 && Math.abs(entropyLastYawStep) > 0.1f) {
-            yawOut = entropyLastYawStep * (0.8f + (float) Math.random() * 0.4f);
+
+        if (entropyTick % 5 == 0 && Math.abs(entropyLastYawStep) > gcd) {
+            yawOut = yawOut * 0.65f + entropyLastYawStep * 0.35f;
         }
-        
-        // Prevent similar entropy between yaw and pitch windows
-        if (entropyTick % 10 == 0) {
-            float ratio = Math.abs(yawOut) > 0.01f ? Math.abs(pitchOut / yawOut) : 1.0f;
-            if (ratio > 0.9f && ratio < 1.1f) {
-                pitchOut *= (0.7f + (float) Math.random() * 0.3f);
-            }
+        if (entropyTick % 7 == 0 && Math.abs(entropyLastPitchStep) > gcd * 0.75f) {
+            pitchOut = pitchOut * 0.7f + entropyLastPitchStep * 0.3f;
         }
-        
-        // Clamp and quantize
+
         yawOut = MathHelper.clamp_float(yawOut, -maxYawStep, maxYawStep);
         pitchOut = MathHelper.clamp_float(pitchOut, -maxPitchStep, maxPitchStep);
-        yawOut = Math.round(yawOut / gcd) * gcd;
-        pitchOut = Math.round(pitchOut / gcd) * gcd;
-        
-        return new Pair<>(yawOut, pitchOut);
+        return applyEntropyBypass(yawOut, pitchOut, gcd, maxYawStep, maxPitchStep, true);
     }
     
-    private float[] getRotationsGeneral(EntityLivingBase target) {
-        // General: Grim-style stepping, interpolation, and softened pitch with light noise
-        // Enhanced with anti-cheat bypass for MX (Factor, Distinct) and AGC (AimAssistB, AimAssistC)
-        final float maxYawStep = 8.5f;
-        final float maxPitchStep = 4.0f;
-        final float accel = 0.35f;
-        final float stopThreshold = 0.15f;
-        final float readyYawThreshold = 1.5f;
-        final float readyPitchThreshold = 1.0f;
-
-        boolean hasTarget = target != null && !target.isDead;
-        final boolean allowJitter = shouldAllowJitter(target);
-        aimSimulator.setJitterAllowed(allowJitter);
-
-        // Configure aim simulator with optional noise (scaled down to ~20% strength)
-        aimSimulator.setNearest(true, 1.0);
-        aimSimulator.setLazy(false, 1.0);
-
-        final int prMode = parent.pointRandomizationMode != null ? (int) parent.pointRandomizationMode.getInput() : 0;
-        boolean enableNoise = prMode != 0 && parent.noise != null && parent.noise.isToggled();
-        if (!allowJitter) enableNoise = false;
-        float noiseMultiplier = 1.0f;
-        if (enableNoise && parent.noiseRangeDecrease != null && parent.noiseRangeDecrease.isToggled() && target != null) {
-            double distance = mc.thePlayer.getDistanceToEntity(target);
-            double threshold = parent.noiseRangeDecreaseThreshold.getInput();
-            double disableRange = parent.noiseRangeDecreaseDisable.getInput();
-
-            if (distance <= disableRange) {
-                enableNoise = false;
-            } else if (distance < threshold) {
-                double range = threshold - disableRange;
-                if (range > 0) {
-                    noiseMultiplier = (float) ((distance - disableRange) / range);
-                    noiseMultiplier = Math.max(0.0f, Math.min(1.0f, noiseMultiplier));
-                }
-            }
-        }
-
-        float horizontalNoise = parent.noiseHorizontal != null ? (float) parent.noiseHorizontal.getInput() : 0.35f;
-        float verticalNoise = parent.noiseVertical != null ? (float) parent.noiseVertical.getInput() : 0.5f;
-        // Apply noise at 20% of configured strength (pitch especially reduced)
-        horizontalNoise *= 0.2f * noiseMultiplier;
-        verticalNoise *= 0.2f * noiseMultiplier;
-
-        double aimSpeed = parent.noiseAimSpeed != null ? parent.noiseAimSpeed.getInput() : 0.35;
-        long noiseDelay = parent.noiseDelay != null ? (long) parent.noiseDelay.getInput() : 100L;
-        aimSimulator.setNoise(enableNoise, new Pair<>(horizontalNoise, verticalNoise), aimSpeed, noiseDelay);
-        int mappedMode = prMode == 0 ? 2 : prMode;
-        aimSimulator.setPointRandomizationMode(enableNoise ? mappedMode : 0);
-        aimSimulator.setDelay(false, 0);
-
-        float targetYaw;
-        float targetPitch;
-
-        if (hasTarget && isInterpolating && previousTarget != null && !previousTarget.isDead) {
-            long elapsed = System.currentTimeMillis() - interpolationStartTime;
-            float interpolationDuration = (float) parent.interpolationTime.getInput();
-            float progress = interpolationDuration > 0 ? Math.min(1.0f, (float) elapsed / interpolationDuration) : 1.0f;
-
-            Pair<Float, Float> oldResult = aimSimulator.getRotation(previousTarget);
-            Pair<Float, Float> newResult = aimSimulator.getRotation(target);
-
-            float oldYaw = oldResult.first();
-            float oldPitch = oldResult.second();
-            float newYaw = newResult.first();
-            float newPitch = newResult.second();
-
-            float easedProgress = progress < 0.5f
-                    ? 2 * progress * progress
-                    : 1 - (float) Math.pow(-2 * progress + 2, 2) / 2;
-
-            float yawDelta = RotationUtils.normalize(newYaw - oldYaw);
-            targetYaw = oldYaw + yawDelta * easedProgress;
-            targetPitch = oldPitch + (newPitch - oldPitch) * easedProgress;
-
-            actualTargetYaw = newYaw;
-            actualTargetPitch = newPitch;
-            hasValidTarget = true;
-            lastValidTargetYaw = newYaw;
-            lastValidTargetPitch = newPitch;
-
-            if (progress >= 1.0f) {
-                isInterpolating = false;
-                previousTarget = null;
-            }
-        } else if (hasTarget) {
-            Pair<Float, Float> res = aimSimulator.getRotation(target);
-            targetYaw = res.first();
-            targetPitch = res.second();
-            actualTargetYaw = targetYaw;
-            actualTargetPitch = targetPitch;
-            hasValidTarget = true;
-            lastValidTargetYaw = targetYaw;
-            lastValidTargetPitch = targetPitch;
-        } else {
-            if (hasValidTarget) {
-                targetYaw = lastValidTargetYaw;
-                targetPitch = lastValidTargetPitch;
-            } else {
-                targetYaw = RotationHandler.getRotationYaw();
-                targetPitch = RotationHandler.getRotationPitch();
-            }
-        }
-
-        float currentYaw = rotations[0];
-        float currentPitch = rotations[1];
-
-        float yawDiff = RotationUtils.normalize(targetYaw - currentYaw);
-        float pitchDiff = targetPitch - currentPitch;
-
-        // Apply carry to spread large moves across multiple ticks (avoids 0-big-0 patterns)
-        yawDiff += generalYawCarry;
-        pitchDiff += generalPitchCarry;
-
-        // Desired per-tick step capped to realistic mouse movement
-        float desiredYawStep = MathHelper.clamp_float(yawDiff, -maxYawStep, maxYawStep);
-        float desiredPitchStep = MathHelper.clamp_float(pitchDiff, -maxPitchStep, maxPitchStep);
-
-        // Update carry for next tick
-        generalYawCarry = yawDiff - desiredYawStep;
-        generalPitchCarry = pitchDiff - desiredPitchStep;
-
-        // Quantize to mouse steps to stay sensitivity-aligned
-        float gcd = getMouseGCD();
-        desiredYawStep = Math.round(desiredYawStep / gcd) * gcd;
-        desiredPitchStep = Math.round(desiredPitchStep / gcd) * gcd;
-
-        // MX Aim Factor bypass: Only apply when actually needed (huge rotations >35°)
-        // This prevents small-huge-small patterns that MX detects
-        float absYawStep = Math.abs(desiredYawStep);
-        if (absYawStep > 35.0f) {
-            // Limit huge rotations to spread across ticks, but don't force extra movement
-            float maxAllowed = 32.0f; // More conservative limit
-            desiredYawStep = Math.copySign(Math.min(absYawStep, maxAllowed), desiredYawStep);
-            // Recalculate carry after limiting
-            generalYawCarry = yawDiff - desiredYawStep;
-        }
-
-        // Minimal pitch movement when yaw is significant (AGC AimAssistC bypass)
-        // Only apply when pitch would be exactly unchanged with significant yaw (>= 3.0)
-        if (allowJitter && Math.abs(desiredYawStep) >= 2.8f && Math.abs(desiredPitchStep) < 0.05f) {
-            // Add subtle pitch variation - just enough to avoid detection
-            float minPitch = 0.12f + (float)(Math.random() * 0.08f); // 0.12-0.20 degrees
-            desiredPitchStep = Math.copySign(minPitch, pitchDiff != 0 ? pitchDiff : (Math.random() > 0.5 ? 1 : -1));
-            generalPitchCarry = pitchDiff - desiredPitchStep;
-            desiredPitchStep = Math.round(desiredPitchStep / gcd) * gcd;
-        }
-
-        // Simple acceleration towards desired step
-        yawVelocity += (desiredYawStep - yawVelocity) * accel;
-        pitchVelocity += (desiredPitchStep - pitchVelocity) * accel;
-
-        // Sensitivity-based quantization (mouse GCD)
-        float quantizedYaw = Math.round(yawVelocity / gcd) * gcd;
-        float quantizedPitch = Math.round(pitchVelocity / gcd) * gcd;
-        Pair<Float, Float> entropySteps = applyEntropyBypass(quantizedYaw, quantizedPitch, gcd, maxYawStep, maxPitchStep, allowJitter);
-        quantizedYaw = entropySteps.first();
-        quantizedPitch = entropySteps.second();
-
-        // Stop jitter when very close
-        if (Math.abs(yawDiff) < stopThreshold) quantizedYaw = 0f;
-        if (Math.abs(pitchDiff) < stopThreshold) quantizedPitch = 0f;
-        
-        // MX Invalid Pitch bypass: Sanitize tiny pitch deltas
-        if (Math.abs(quantizedPitch) < 1e-4f && Math.abs(quantizedPitch) > 0) {
-            quantizedPitch = 0f;
-        }
-
-        rotations[0] = MathHelper.wrapAngleTo180_float(currentYaw + quantizedYaw);
-        rotations[1] = MathHelper.clamp_float(currentPitch + quantizedPitch, -90f, 90f);
-
-        // AGC AimAssistC bypass (final safety check): only if pitch is still unchanged with significant yaw
-        float finalYawDelta = Math.abs(RotationUtils.normalize(rotations[0] - currentYaw));
-        if (allowJitter && finalYawDelta >= 2.8f && Math.abs(rotations[1] - currentPitch) < 0.01f) {
-            // Add minimal pitch variation - just enough to avoid detection
-            float pitchJitter = 0.15f + (float)(Math.random() * 0.1f); // 0.15-0.25 degrees (much smaller)
-            rotations[1] = MathHelper.clamp_float(rotations[1] + (jitterFlip ? pitchJitter : -pitchJitter), -90f, 90f);
-            jitterFlip = !jitterFlip;
-        }
-
-        // AGC AimAssistB bypass (final safety check): only break exact 0.1 multiples when detected
-        float finalYawDiff = Math.abs(RotationUtils.normalize(rotations[0] - currentYaw)) % 180.0f;
-        if (allowJitter && finalYawDiff > 1.0f && finalYawDiff < 10.0f) { // Only check reasonable ranges
-            float roundedCheck = Math.round(finalYawDiff * 10.0f) * 0.1f;
-            float wholeDiff = Math.abs(Math.round(finalYawDiff) - finalYawDiff);
-            // Only break if it's a perfect 0.1 multiple (not whole number)
-            if (Math.abs(roundedCheck - finalYawDiff) < 0.001f && wholeDiff > 0.05f) {
-                // Minimal noise, but still sensitivity-aligned
-                float microNoise = (Math.random() > 0.5 ? gcd : -gcd);
-                rotations[0] = MathHelper.wrapAngleTo180_float(rotations[0] + microNoise);
-            }
-        }
-
-        // Avoid duplicate-look: if no change, nudge by tiny GCD step alternating
-        if (allowJitter && Math.abs(RotationUtils.normalize(rotations[0] - lastGrimYaw)) < 1e-3 && Math.abs(rotations[1] - lastGrimPitch) < 1e-3) {
-            float nudge = gcd;
-            rotations[0] = MathHelper.wrapAngleTo180_float(rotations[0] + (jitterFlip ? nudge : -nudge));
-            jitterFlip = !jitterFlip;
-        }
-
-        if (!hasTarget) {
-            // Keep player-facing direction stable when idle (no target)
-            yawVelocity = 0.0f;
-            pitchVelocity = 0.0f;
-            rotations[0] = RotationHandler.getRotationYaw();
-            rotations[1] = RotationHandler.getRotationPitch();
-            lastGrimYaw = rotations[0];
-            lastGrimPitch = rotations[1];
-            grimReady = false;
-            lastUpdateMs = System.currentTimeMillis();
-            return rotations;
-        }
-
-        // AimModulo360 bypass: ensure yaw stays out of modulo edge without huge spikes
-        rotations = applyAimModuloBypass(rotations, hasTarget);
-
-        lastGrimYaw = rotations[0];
-        lastGrimPitch = rotations[1];
-
-        grimReady = Math.abs(yawDiff) <= readyYawThreshold && Math.abs(pitchDiff) <= readyPitchThreshold;
-        lastUpdateMs = System.currentTimeMillis();
-        return rotations;
-    }
-
     /**
      * Pick a stable aim point inside the target's bounding box to minimize sudden angular deltas.
      */
@@ -1503,7 +1216,7 @@ public class KillAuraRotation {
         pitchOut = Math.round(pitchOut / gcd) * gcd;
 
         // Keep deltas on a coarser shared grid and ratio-clamped to avoid MX Aim Constant (1/2/3)
-        Pair<Float, Float> constantSteps = applyConstantBypass(yawOut, pitchOut, gcd, maxYawStep, maxPitchStep);
+        Pair<Float, Float> constantSteps = applyConstantBypass(yawOut, pitchOut, gcd, maxYawStep, maxPitchStep, false);
         yawOut = constantSteps.first();
         pitchOut = constantSteps.second();
 
@@ -1595,7 +1308,8 @@ public class KillAuraRotation {
      * step bounded so MX AimConstant (1/2/3) sees a stable GCD and modest modulo.
      */
     private Pair<Float, Float> applyConstantBypass(float yawOut, float pitchOut, float baseGcd,
-                                                   float maxYawStep, float maxPitchStep) {
+                                                   float maxYawStep, float maxPitchStep,
+                                                   boolean directLargeTurn) {
         // Coarse grid keeps gcd >= ~0.05 (greater than MX 1/128 threshold ~0.0078)
         float grid = Math.max(baseGcd, 0.05f);
         float alignedYaw = Math.round(yawOut / grid) * grid;
@@ -1604,15 +1318,19 @@ public class KillAuraRotation {
         // Ratio clamp vs previous step to avoid huge modulo spikes
         if (Math.abs(constantLastYawStep) > 1.0E-4f) {
             float ratioYaw = alignedYaw / constantLastYawStep;
-            float clampedRatio = Math.max(-8f, Math.min(8f, ratioYaw));
-            if (Math.abs(clampedRatio) < 0.2f) clampedRatio = 0.2f * Math.signum(clampedRatio == 0 ? 1f : clampedRatio);
+            float minRatioYaw = directLargeTurn ? 0.45f : 0.2f;
+            float maxRatioYaw = directLargeTurn ? 12f : 8f;
+            float clampedRatio = Math.max(-maxRatioYaw, Math.min(maxRatioYaw, ratioYaw));
+            if (Math.abs(clampedRatio) < minRatioYaw) clampedRatio = minRatioYaw * Math.signum(clampedRatio == 0 ? 1f : clampedRatio);
             alignedYaw = constantLastYawStep * clampedRatio;
             alignedYaw = Math.round(alignedYaw / grid) * grid;
         }
         if (Math.abs(constantLastPitchStep) > 1.0E-4f) {
             float ratioPitch = alignedPitch / constantLastPitchStep;
-            float clampedRatio = Math.max(-6f, Math.min(6f, ratioPitch));
-            if (Math.abs(clampedRatio) < 0.25f) clampedRatio = 0.25f * Math.signum(clampedRatio == 0 ? 1f : clampedRatio);
+            float minRatioPitch = directLargeTurn ? 0.35f : 0.25f;
+            float maxRatioPitch = directLargeTurn ? 8f : 6f;
+            float clampedRatio = Math.max(-maxRatioPitch, Math.min(maxRatioPitch, ratioPitch));
+            if (Math.abs(clampedRatio) < minRatioPitch) clampedRatio = minRatioPitch * Math.signum(clampedRatio == 0 ? 1f : clampedRatio);
             alignedPitch = constantLastPitchStep * clampedRatio;
             alignedPitch = Math.round(alignedPitch / grid) * grid;
         }
@@ -1625,22 +1343,54 @@ public class KillAuraRotation {
         return new Pair<>(alignedYaw, alignedPitch);
     }
 
-    private float[] applyAimModuloBypass(float[] rots, boolean hasTarget) {
+    private float[] applyAdvancedModuloBypass(float[] rots, float prevYaw, boolean hasTarget) {
         if (!hasTarget) {
+            return rots;
+        }
+        if (parent.advModuloBypass == null || !parent.advModuloBypass.isToggled()) {
             return rots;
         }
         // Only necessary for silent rotations; avoid camera snapping
         if (parent.rotationMode != null && parent.rotationMode.getInput() != 1) {
             return rots;
         }
-        float yaw = rots[0];
-        if (Math.abs(yaw) < 270f) {
-            float offset = 720f;
-            float sign = yaw == 0 ? 1f : Math.signum(yaw);
-            yaw += sign * offset;
-        }
-        rots[0] = yaw;
+        rots[0] = keepYawContinuous(rots[0], prevYaw);
         return rots;
+    }
+
+    private float[] applyGrimModuloBypass(float[] rots, float prevYaw, boolean hasTarget) {
+        if (!hasTarget) {
+            return rots;
+        }
+        if (parent.rotationMode != null && parent.rotationMode.getInput() != 1) {
+            return rots;
+        }
+        rots[0] = keepYawContinuous(rots[0], prevYaw);
+        return rots;
+    }
+
+    private float keepYawContinuous(float yaw, float referenceYaw) {
+        float continuousYaw = yaw;
+        while (continuousYaw - referenceYaw > 180f) {
+            continuousYaw -= 360f;
+        }
+        while (continuousYaw - referenceYaw < -180f) {
+            continuousYaw += 360f;
+        }
+        return continuousYaw;
+    }
+
+    private float normalizeVisualYaw(float yaw) {
+        if (Math.abs(yaw) > 180f) {
+            return MathHelper.wrapAngleTo180_float(yaw);
+        }
+        return yaw;
+    }
+
+    private float[] ensureIdleRotationsMatchView(float[] rot) {
+        rot[0] = normalizeVisualYaw(RotationHandler.getRotationYaw());
+        rot[1] = RotationHandler.getRotationPitch();
+        return rot;
     }
 
     private float[] applyPitchStabilizer(float[] rot, float prevYaw, float prevPitch, boolean hasTarget, boolean allowJitter) {
@@ -1709,12 +1459,8 @@ public class KillAuraRotation {
 
         // When there's no target: follow client-side rotation fully (no jitter/nudge)
         if (!hasTarget) {
-            rot[0] = RotationHandler.getRotationYaw();
-            rot[1] = RotationHandler.getRotationPitch();
-            return rot;
+            return ensureIdleRotationsMatchView(rot);
         }
-
-        rot = applyAimModuloBypass(rot, hasTarget);
         return rot;
     }
 

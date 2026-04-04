@@ -45,6 +45,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 public class KillAura extends IAutoClicker {
+    public static final int ROTATION_ALGORITHM_CLASSIC = 0;
+    public static final int ROTATION_ALGORITHM_V2 = 1;
+    public static final int ROTATION_ALGORITHM_GRIM = 2;
+    public static final int ROTATION_ALGORITHM_ADVANCED = 3;
+
     public static EntityLivingBase target;
     
     // Settings
@@ -95,11 +100,6 @@ public class KillAura extends IAutoClicker {
     public final ButtonSetting v2Overshoot;
     public final SliderSetting overshootAmount;
     public final SliderSetting overshootChance;
-    public final SliderSetting inertiaAcceleration;
-    public final SliderSetting inertiaMaxSpeed;
-    public final SliderSetting inertiaFriction;
-    public final SliderSetting inertiaDeadZone;
-    
     // Advanced Rotation Mode Settings
     public final ModeSetting advAimPointMode;
     public final SliderSetting advAimOffset;
@@ -206,6 +206,10 @@ public class KillAura extends IAutoClicker {
     private int movementCount = 0;
     private long lastMovementResetTime = 0L;
 
+    private boolean isRotationAlgorithm(int algorithm) {
+        return rotationAlgorithmMode != null && (int) rotationAlgorithmMode.getInput() == algorithm;
+    }
+
     public KillAura() {
         super("KillAura", category.combat);
         
@@ -272,86 +276,66 @@ public class KillAura extends IAutoClicker {
         this.registerSetting(rotationMode = new ModeSetting("Rotation", rotationModes, 1));
         final ModeOnly doRotation = new ModeOnly(rotationMode, 1, 2);
         // Rotation algorithm modes
-        this.registerSetting(rotationAlgorithmMode = new ModeSetting("Rotation mode", new String[]{"Classic", "Vulcan / V2", "Inertia", "Grim", "General", "Advanced"}, 0, doRotation));
-        final java.util.function.Supplier<Boolean> classicMode = doRotation.extend(() -> rotationAlgorithmMode.getInput() == 0);
-        final java.util.function.Supplier<Boolean> v2RotationMode = doRotation.extend(() -> rotationAlgorithmMode.getInput() == 1);
-        final java.util.function.Supplier<Boolean> inertiaRotationMode = doRotation.extend(() -> rotationAlgorithmMode.getInput() == 2);
-        final java.util.function.Supplier<Boolean> v2InertiaGeneralMode = doRotation.extend(() -> {
-            int algo = (int) rotationAlgorithmMode.getInput();
-            return algo == 1 || algo == 2 || algo == 4;
-        });
-        final java.util.function.Supplier<Boolean> grimRotationMode = doRotation.extend(() -> rotationAlgorithmMode.getInput() == 3);
-        final java.util.function.Supplier<Boolean> advancedRotationMode = doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5);
+        this.registerSetting(rotationAlgorithmMode = new ModeSetting("Rotation mode", new String[]{"Classic", "Vulcan / V2", "Grim", "Advanced"}, 0, doRotation));
+        final java.util.function.Supplier<Boolean> classicMode = doRotation.extend(() -> isRotationAlgorithm(ROTATION_ALGORITHM_CLASSIC));
+        final java.util.function.Supplier<Boolean> v2RotationMode = doRotation.extend(() -> isRotationAlgorithm(ROTATION_ALGORITHM_V2));
+        final java.util.function.Supplier<Boolean> advancedRotationMode = doRotation.extend(() -> isRotationAlgorithm(ROTATION_ALGORITHM_ADVANCED));
         this.registerSetting(minRotationSpeed = new SliderSetting("Min rotation speed", 8, 0, 10, 0.05, classicMode));
         this.registerSetting(maxRotationSpeed = new SliderSetting("Max rotation speed", 10, 0, 10, 0.05, classicMode));
         this.registerSetting(v2MinRotationSpeed = new SliderSetting("Min rotation speed", 2, 2, 20, 0.1, v2RotationMode));
         this.registerSetting(v2MaxRotationSpeed = new SliderSetting("Max rotation speed", 20, 2, 20, 0.1, v2RotationMode));
         this.registerSetting(v2RotationType = new ModeSetting("Rotation type", new String[]{"Instant", "Nearest"}, 0, v2RotationMode));
         this.registerSetting(rotationSmoothing = new ButtonSetting("Rotation smoothing", false, classicMode));
-        this.registerSetting(v2RotationSmoothing = new ButtonSetting("Rotation smoothing", false, v2InertiaGeneralMode));
-        this.registerSetting(mxPitchBypass = new ButtonSetting("MX Pitch Bypass", false, v2InertiaGeneralMode));
+        this.registerSetting(v2RotationSmoothing = new ButtonSetting("Rotation smoothing", false, v2RotationMode));
+        this.registerSetting(mxPitchBypass = new ButtonSetting("MX Pitch Bypass", false, v2RotationMode));
         this.registerSetting(overshoot = new ButtonSetting("Overshoot", false, classicMode));
-        this.registerSetting(v2Overshoot = new ButtonSetting("Overshoot", false, v2InertiaGeneralMode));
-        this.registerSetting(overshootAmount = new SliderSetting("Overshoot amount", 2.0, 0.5, 5.0, 0.1, doRotation.extend(() -> overshoot.isToggled() || ((rotationAlgorithmMode.getInput() == 1 || rotationAlgorithmMode.getInput() == 2 || rotationAlgorithmMode.getInput() == 4) && v2Overshoot.isToggled()))));
-        this.registerSetting(overshootChance = new SliderSetting("Overshoot chance", 30.0, 0.0, 100.0, 1.0, "%", doRotation.extend(() -> overshoot.isToggled() || ((rotationAlgorithmMode.getInput() == 1 || rotationAlgorithmMode.getInput() == 2 || rotationAlgorithmMode.getInput() == 4) && v2Overshoot.isToggled()))));
-        this.registerSetting(inertiaAcceleration = new SliderSetting("Inertia acceleration", 1.1, 0.1, 5.0, 0.05, inertiaRotationMode));
-        this.registerSetting(inertiaMaxSpeed = new SliderSetting("Inertia max speed", 12.0, 2.0, 40.0, 0.5, inertiaRotationMode));
-        this.registerSetting(inertiaFriction = new SliderSetting("Inertia friction", 0.88, 0.6, 1.0, 0.01, inertiaRotationMode));
-        this.registerSetting(inertiaDeadZone = new SliderSetting("Inertia deadzone", 0.35, 0.0, 3.0, 0.05, inertiaRotationMode));
+        this.registerSetting(v2Overshoot = new ButtonSetting("Overshoot", false, v2RotationMode));
+        this.registerSetting(overshootAmount = new SliderSetting("Overshoot amount", 2.0, 0.5, 5.0, 0.1, doRotation.extend(() -> overshoot.isToggled() || (isRotationAlgorithm(ROTATION_ALGORITHM_V2) && v2Overshoot.isToggled()))));
+        this.registerSetting(overshootChance = new SliderSetting("Overshoot chance", 30.0, 0.0, 100.0, 1.0, "%", doRotation.extend(() -> overshoot.isToggled() || (isRotationAlgorithm(ROTATION_ALGORITHM_V2) && v2Overshoot.isToggled()))));
         this.registerSetting(moveFixMode = new ModeSetting("Move fix", RotationHandler.MoveFix.MODES, 0, new ModeOnly(rotationMode, 1)));
         this.registerSetting(rayCastMode = new ModeSetting("Ray cast", new String[]{"None", "Normal", "Strict"}, 1, doRotation));
         this.registerSetting(nearest = new ButtonSetting("Nearest", false, classicMode));
-        this.registerSetting(v2Nearest = new ButtonSetting("Nearest", false, v2InertiaGeneralMode));
-        this.registerSetting(nearestAccuracy = new SliderSetting("Nearest accuracy", 1, 0.8, 1, 0.01, doRotation.extend(() -> (rotationAlgorithmMode.getInput() == 0 && nearest.isToggled()) || ((rotationAlgorithmMode.getInput() == 1 || rotationAlgorithmMode.getInput() == 2 || rotationAlgorithmMode.getInput() == 4) && v2Nearest.isToggled()))));
+        this.registerSetting(v2Nearest = new ButtonSetting("Nearest", false, v2RotationMode));
+        this.registerSetting(nearestAccuracy = new SliderSetting("Nearest accuracy", 1, 0.8, 1, 0.01, doRotation.extend(() -> (isRotationAlgorithm(ROTATION_ALGORITHM_CLASSIC) && nearest.isToggled()) || (isRotationAlgorithm(ROTATION_ALGORITHM_V2) && v2Nearest.isToggled()))));
         this.registerSetting(lazy = new ButtonSetting("Lazy", false, classicMode));
-        this.registerSetting(v2Lazy = new ButtonSetting("Lazy", false, v2InertiaGeneralMode));
-        this.registerSetting(lazyAccuracy = new SliderSetting("Lazy accuracy", 0.95, 0.6, 1, 0.01, doRotation.extend(() -> (rotationAlgorithmMode.getInput() == 0 && lazy.isToggled()) || ((rotationAlgorithmMode.getInput() == 1 || rotationAlgorithmMode.getInput() == 2 || rotationAlgorithmMode.getInput() == 4) && v2Lazy.isToggled()))));
+        this.registerSetting(v2Lazy = new ButtonSetting("Lazy", false, v2RotationMode));
+        this.registerSetting(lazyAccuracy = new SliderSetting("Lazy accuracy", 0.95, 0.6, 1, 0.01, doRotation.extend(() -> (isRotationAlgorithm(ROTATION_ALGORITHM_CLASSIC) && lazy.isToggled()) || (isRotationAlgorithm(ROTATION_ALGORITHM_V2) && v2Lazy.isToggled()))));
         this.registerSetting(constant = new ButtonSetting("Constant", false, classicMode));
-        this.registerSetting(v2Constant = new ButtonSetting("Constant", false, v2InertiaGeneralMode));
-        this.registerSetting(constantOnlyIfNotMoving = new ButtonSetting("Constant only if not moving", false, doRotation.extend(() -> (rotationAlgorithmMode.getInput() == 0 && constant.isToggled()) || ((rotationAlgorithmMode.getInput() == 1 || rotationAlgorithmMode.getInput() == 2 || rotationAlgorithmMode.getInput() == 4) && v2Constant.isToggled()))));
+        this.registerSetting(v2Constant = new ButtonSetting("Constant", false, v2RotationMode));
+        this.registerSetting(constantOnlyIfNotMoving = new ButtonSetting("Constant only if not moving", false, doRotation.extend(() -> (isRotationAlgorithm(ROTATION_ALGORITHM_CLASSIC) && constant.isToggled()) || (isRotationAlgorithm(ROTATION_ALGORITHM_V2) && v2Constant.isToggled()))));
         
         this.registerSetting(noise = new ButtonSetting("Noise", false, doRotation.extend(() -> {
-            int algo = (int) rotationAlgorithmMode.getInput();
-            return algo == 0;
+            return isRotationAlgorithm(ROTATION_ALGORITHM_CLASSIC);
         })));
-        this.registerSetting(v2Noise = new ButtonSetting("Noise", false, v2InertiaGeneralMode));
+        this.registerSetting(v2Noise = new ButtonSetting("Noise", false, v2RotationMode));
         this.registerSetting(pointRandomizationMode = new ModeSetting("Mode", new String[]{"None", "Basic", "Linear", "Smooth"}, 0, doRotation.extend(() -> {
-            int algo = (int) rotationAlgorithmMode.getInput();
-            return (algo == 0 && noise.isToggled()) || ((algo == 1 || algo == 2 || algo == 4) && v2Noise.isToggled());
+            return (isRotationAlgorithm(ROTATION_ALGORITHM_CLASSIC) && noise.isToggled()) || (isRotationAlgorithm(ROTATION_ALGORITHM_V2) && v2Noise.isToggled());
         })));
         this.registerSetting(noiseHorizontal = new SliderSetting("Noise horizontal", 0.35, 0.01, 1, 0.01, doRotation.extend(() -> {
-            int algo = (int) rotationAlgorithmMode.getInput();
-            return (algo == 0 && noise.isToggled()) || ((algo == 1 || algo == 2 || algo == 4) && v2Noise.isToggled());
+            return (isRotationAlgorithm(ROTATION_ALGORITHM_CLASSIC) && noise.isToggled()) || (isRotationAlgorithm(ROTATION_ALGORITHM_V2) && v2Noise.isToggled());
         })));
         this.registerSetting(noiseVertical = new SliderSetting("Noise vertical", 0.5, 0.01, 1, 0.01, doRotation.extend(() -> {
-            int algo = (int) rotationAlgorithmMode.getInput();
-            return (algo == 0 && noise.isToggled()) || ((algo == 1 || algo == 2 || algo == 4) && v2Noise.isToggled());
+            return (isRotationAlgorithm(ROTATION_ALGORITHM_CLASSIC) && noise.isToggled()) || (isRotationAlgorithm(ROTATION_ALGORITHM_V2) && v2Noise.isToggled());
         })));
         this.registerSetting(noiseAimSpeed = new SliderSetting("Noise aim speed", 0.35, 0.01, 1, 0.01, doRotation.extend(() -> {
-            int algo = (int) rotationAlgorithmMode.getInput();
-            return (algo == 0 && noise.isToggled()) || ((algo == 1 || algo == 2 || algo == 4) && v2Noise.isToggled());
+            return (isRotationAlgorithm(ROTATION_ALGORITHM_CLASSIC) && noise.isToggled()) || (isRotationAlgorithm(ROTATION_ALGORITHM_V2) && v2Noise.isToggled());
         })));
         this.registerSetting(noiseDelay = new SliderSetting("Noise delay", 100, 50, 500, 10, doRotation.extend(() -> {
-            int algo = (int) rotationAlgorithmMode.getInput();
-            return (algo == 0 && noise.isToggled()) || ((algo == 1 || algo == 2 || algo == 4) && v2Noise.isToggled());
+            return (isRotationAlgorithm(ROTATION_ALGORITHM_CLASSIC) && noise.isToggled()) || (isRotationAlgorithm(ROTATION_ALGORITHM_V2) && v2Noise.isToggled());
         })));
         this.registerSetting(noiseRangeDecrease = new ButtonSetting("Range decrease", false, doRotation.extend(() -> {
-            int algo = (int) rotationAlgorithmMode.getInput();
-            return (algo == 0 && noise.isToggled()) || ((algo == 1 || algo == 2 || algo == 4) && v2Noise.isToggled());
+            return (isRotationAlgorithm(ROTATION_ALGORITHM_CLASSIC) && noise.isToggled()) || (isRotationAlgorithm(ROTATION_ALGORITHM_V2) && v2Noise.isToggled());
         })));
         this.registerSetting(noiseRangeDecreaseThreshold = new SliderSetting("Range decrease threshold", 3.0, 1.0, 6.0, 0.1, doRotation.extend(() -> {
-            int algo = (int) rotationAlgorithmMode.getInput();
-            return (((algo == 0 && noise.isToggled()) || ((algo == 1 || algo == 2 || algo == 4) && v2Noise.isToggled())) && noiseRangeDecrease.isToggled());
+            return (((isRotationAlgorithm(ROTATION_ALGORITHM_CLASSIC) && noise.isToggled()) || (isRotationAlgorithm(ROTATION_ALGORITHM_V2) && v2Noise.isToggled())) && noiseRangeDecrease.isToggled());
         })));
         this.registerSetting(noiseRangeDecreaseDisable = new SliderSetting("Range decrease disable", 2.0, 0.5, 4.0, 0.1, doRotation.extend(() -> {
-            int algo = (int) rotationAlgorithmMode.getInput();
-            return (((algo == 0 && noise.isToggled()) || ((algo == 1 || algo == 2 || algo == 4) && v2Noise.isToggled())) && noiseRangeDecrease.isToggled());
+            return (((isRotationAlgorithm(ROTATION_ALGORITHM_CLASSIC) && noise.isToggled()) || (isRotationAlgorithm(ROTATION_ALGORITHM_V2) && v2Noise.isToggled())) && noiseRangeDecrease.isToggled());
         })));
         this.registerSetting(delayAim = new ButtonSetting("Delay aim", false, classicMode));
-        this.registerSetting(v2DelayAim = new ButtonSetting("Delay aim", false, v2InertiaGeneralMode));
+        this.registerSetting(v2DelayAim = new ButtonSetting("Delay aim", false, v2RotationMode));
         this.registerSetting(delayAimAmount = new SliderSetting("Delay aim amount", 5, 5, 100, 1, doRotation.extend(() -> {
-            int algo = (int) rotationAlgorithmMode.getInput();
-            return (algo == 0 && delayAim.isToggled()) || ((algo == 1 || algo == 2 || algo == 4) && v2DelayAim.isToggled());
+            return (isRotationAlgorithm(ROTATION_ALGORITHM_CLASSIC) && delayAim.isToggled()) || (isRotationAlgorithm(ROTATION_ALGORITHM_V2) && v2DelayAim.isToggled());
         })));
         
         // === Advanced Mode Settings ===
@@ -363,8 +347,8 @@ public class KillAura extends IAutoClicker {
         
         // Prediction Settings
         this.registerSetting(advPrediction = new ButtonSetting("Prediction", true, advancedRotationMode));
-        this.registerSetting(advPredictionStrength = new SliderSetting("Prediction strength", 0.5, 0.0, 1.0, 0.05, doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advPrediction.isToggled())));
-        this.registerSetting(advPredictionMode = new ModeSetting("Prediction mode", new String[]{"Linear", "Cubic", "Exponential"}, 0, doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advPrediction.isToggled())));
+        this.registerSetting(advPredictionStrength = new SliderSetting("Prediction strength", 0.5, 0.0, 1.0, 0.05, doRotation.extend(() -> isRotationAlgorithm(ROTATION_ALGORITHM_ADVANCED) && advPrediction.isToggled())));
+        this.registerSetting(advPredictionMode = new ModeSetting("Prediction mode", new String[]{"Linear", "Cubic", "Exponential"}, 0, doRotation.extend(() -> isRotationAlgorithm(ROTATION_ALGORITHM_ADVANCED) && advPrediction.isToggled())));
         
         // Smoothing Settings
         this.registerSetting(new DescriptionSetting("Smoothing", advancedRotationMode));
@@ -376,23 +360,23 @@ public class KillAura extends IAutoClicker {
         // Noise Settings
         this.registerSetting(new DescriptionSetting("Noise", advancedRotationMode));
         this.registerSetting(advNoise = new ButtonSetting("Noise", true, advancedRotationMode));
-        this.registerSetting(advNoiseH = new SliderSetting("Noise horizontal", 0.4, 0.0, 1.5, 0.05, doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advNoise.isToggled())));
-        this.registerSetting(advNoiseV = new SliderSetting("Noise vertical", 0.3, 0.0, 1.5, 0.05, doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advNoise.isToggled())));
-        this.registerSetting(advNoiseSpeed = new SliderSetting("Noise speed", 0.5, 0.1, 1.0, 0.05, doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advNoise.isToggled())));
+        this.registerSetting(advNoiseH = new SliderSetting("Noise horizontal", 0.4, 0.0, 1.5, 0.05, doRotation.extend(() -> isRotationAlgorithm(ROTATION_ALGORITHM_ADVANCED) && advNoise.isToggled())));
+        this.registerSetting(advNoiseV = new SliderSetting("Noise vertical", 0.3, 0.0, 1.5, 0.05, doRotation.extend(() -> isRotationAlgorithm(ROTATION_ALGORITHM_ADVANCED) && advNoise.isToggled())));
+        this.registerSetting(advNoiseSpeed = new SliderSetting("Noise speed", 0.5, 0.1, 1.0, 0.05, doRotation.extend(() -> isRotationAlgorithm(ROTATION_ALGORITHM_ADVANCED) && advNoise.isToggled())));
         
         // GCD Settings
         this.registerSetting(new DescriptionSetting("GCD & Mouse", advancedRotationMode));
         this.registerSetting(advGcdMode = new ModeSetting("GCD mode", new String[]{"Off", "Basic", "Dynamic", "Adaptive"}, 3, advancedRotationMode));
-        this.registerSetting(advGcdVariance = new SliderSetting("GCD variance", 0.15, 0.0, 0.5, 0.01, doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advGcdMode.getInput() >= 2)));
+        this.registerSetting(advGcdVariance = new SliderSetting("GCD variance", 0.15, 0.0, 0.5, 0.01, doRotation.extend(() -> isRotationAlgorithm(ROTATION_ALGORITHM_ADVANCED) && advGcdMode.getInput() >= 2)));
         this.registerSetting(advSensitivitySim = new ButtonSetting("Sensitivity simulation", true, advancedRotationMode));
-        this.registerSetting(advSensitivity = new SliderSetting("Simulated sensitivity", 100, 50, 200, 1, doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advSensitivitySim.isToggled())));
+        this.registerSetting(advSensitivity = new SliderSetting("Simulated sensitivity", 100, 50, 200, 1, doRotation.extend(() -> isRotationAlgorithm(ROTATION_ALGORITHM_ADVANCED) && advSensitivitySim.isToggled())));
         
         // Anti-Cheat Bypass Settings
         this.registerSetting(new DescriptionSetting("Anti-Detection", advancedRotationMode));
         this.registerSetting(advEntropyBypass = new ButtonSetting("Entropy bypass", true, advancedRotationMode));
-        this.registerSetting(advEntropyVariance = new SliderSetting("Entropy variance", 0.12, 0.05, 0.3, 0.01, doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advEntropyBypass.isToggled())));
+        this.registerSetting(advEntropyVariance = new SliderSetting("Entropy variance", 0.12, 0.05, 0.3, 0.01, doRotation.extend(() -> isRotationAlgorithm(ROTATION_ALGORITHM_ADVANCED) && advEntropyBypass.isToggled())));
         this.registerSetting(advStrafeDesync = new ButtonSetting("Strafe desync", true, advancedRotationMode));
-        this.registerSetting(advStrafeDesyncChance = new SliderSetting("Desync chance", 30, 10, 80, 5, "%", doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advStrafeDesync.isToggled())));
+        this.registerSetting(advStrafeDesyncChance = new SliderSetting("Desync chance", 30, 10, 80, 5, "%", doRotation.extend(() -> isRotationAlgorithm(ROTATION_ALGORITHM_ADVANCED) && advStrafeDesync.isToggled())));
         this.registerSetting(advFactorBypass = new ButtonSetting("Factor bypass", true, advancedRotationMode));
         this.registerSetting(advConstantBypass = new ButtonSetting("Constant bypass", true, advancedRotationMode));
         this.registerSetting(advSmoothBypass = new ButtonSetting("Smooth bypass", true, advancedRotationMode));
@@ -403,9 +387,9 @@ public class KillAura extends IAutoClicker {
         this.registerSetting(new DescriptionSetting("Combat", advancedRotationMode));
         this.registerSetting(advCombatAwareness = new ButtonSetting("Combat awareness", true, advancedRotationMode));
         this.registerSetting(advMicroCorrection = new ButtonSetting("Micro-correction", true, advancedRotationMode));
-        this.registerSetting(advMicroCorrectionStr = new SliderSetting("Correction strength", 0.3, 0.1, 0.8, 0.05, doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advMicroCorrection.isToggled())));
+        this.registerSetting(advMicroCorrectionStr = new SliderSetting("Correction strength", 0.3, 0.1, 0.8, 0.05, doRotation.extend(() -> isRotationAlgorithm(ROTATION_ALGORITHM_ADVANCED) && advMicroCorrection.isToggled())));
         this.registerSetting(advOvershoot = new ButtonSetting("Overshoot", false, advancedRotationMode));
-        this.registerSetting(advOvershootAmount = new SliderSetting("Overshoot amount", 0.1, 0.0, 0.5, 0.01, doRotation.extend(() -> rotationAlgorithmMode.getInput() == 5 && advOvershoot.isToggled())));
+        this.registerSetting(advOvershootAmount = new SliderSetting("Overshoot amount", 0.1, 0.0, 0.5, 0.01, doRotation.extend(() -> isRotationAlgorithm(ROTATION_ALGORITHM_ADVANCED) && advOvershoot.isToggled())));
         
         this.registerSetting(new DescriptionSetting("Targets"));
         this.registerSetting(targetingMode = new ModeSetting("Targeting mode", new String[]{"Single", "Switch"}, 0));
@@ -481,28 +465,11 @@ public class KillAura extends IAutoClicker {
         autoBlock.onDisable();
         
         // Fix rotation snap on disable:
-        // If Silent rotation was active, the client's real rotation might be different from the server-side rotation.
-        // However, the issue described is likely due to the sudden snap from a large modulo value (e.g. 36000) 
-        // back to a normal value (e.g. 45) in a single tick, which Grim detects as a massive rotation.
-        // We need to ensure the transition is handled or that we don't send a packet with a huge delta.
-        // Since we modify the yaw sent to the server, disabling the module stops that modification.
-        // The next packet sent by the client will use mc.thePlayer.rotationYaw (e.g. 45).
-        // If the last packet sent was 36045, the server sees a delta of -36000.
-        
-        // To fix this, we should ideally sync the client's rotation to the last sent server rotation (wrapped), 
-        // or ensure the last sent packet was normalized. But we can't easily undo the last packet.
-        // Instead, we can try to set the client's rotation to a value that minimizes the delta for the NEXT packet,
-        // but that would snap the user's view.
-        
-        // Better approach: The "AimModulo360" bypass adds 36000. When disabling, we are effectively removing this offset.
-        // This big jump is exactly what Grim detects. 
-        // WE CANNOT FIX THIS PERFECTLY without risking a view snap or a flag.
-        // BUT, if we are using Silent mode, the client view is already decoupled.
-        // 
-        // If we just let it disable, the next packet is normal.
-        // Maybe we can force a "reset" packet or similar?
-        // Actually, if we modify RotationHandler to NOT return the offset when KA is disabled, that handles it.
-        // The issue is that the LAST packet had the offset. The CURRENT/NEXT packet will not.
+        // If Silent rotation was active, the client's real rotation might differ from the
+        // server-facing yaw. We now keep modulo continuity by unwrapping around the previous
+        // sent yaw instead of jumping to an arbitrary huge offset, but disabling can still
+        // produce one final server/client delta because the next packet follows the real view.
+        // Resetting here keeps the next KillAura activation from inheriting any extended yaw.
         
         if (Utils.nullCheck()) mc.thePlayer.stopUsingItem();
     }
@@ -588,7 +555,7 @@ public class KillAura extends IAutoClicker {
 
     @SubscribeEvent
     public void onPreUpdate(PreUpdateEvent e) {
-        if (useAutoClickerSettings.isToggled() && ModuleManager.autoClicker != null && ModuleManager.autoClicker.isEnabled()) {
+        if (useAutoClickerSettings.isToggled() && ModuleManager.autoClicker != null && ModuleManager.autoClicker.isActive()) {
             keystrokesmod.module.setting.impl.SubMode<?> selectedMode = ModuleManager.autoClicker.mode.getSelected();
             if (selectedMode != null && selectedMode.isEnabled()) {
                 try {
@@ -700,7 +667,7 @@ public class KillAura extends IAutoClicker {
             }
             autoBlock.resetBlinkState(true);
             attack = false;
-            if (rotationAlgorithmMode != null && rotationAlgorithmMode.getInput() == 3 && !rotation.isGrimReady()) return;
+            if (isRotationAlgorithm(ROTATION_ALGORITHM_GRIM) && !rotation.isGrimReady()) return;
             if (noAimToEntity()) return;
             // Intave deltaVL mitigation: optional LOOK->ATTACK spacing jitter
             if (lookAttackJitter.isToggled()) {
@@ -793,28 +760,6 @@ public class KillAura extends IAutoClicker {
         if (autoBlockMode.getInput() == 2 && autoBlock.block.get() && Utils.holdingSword()) {
             mc.getNetHandler().addToSendQueue(new C08PacketPlayerBlockPlacement(SlotHandler.getHeldItem()));
         }
-    }
-
-    @SubscribeEvent(priority = EventPriority.HIGH)
-    public void onSendPacket(SendPacketEvent e) {
-        if (!Utils.nullCheck()) {
-            return;
-        }
-        
-        // For Hypixel autoblock, if Blink is being used silently, let Blink handle it
-        if (autoBlockMode.getInput() == 9 && ModuleManager.blink != null && ModuleManager.blink.isUsedSilently()) {
-            // Blink's handler will take care of packet interception
-            return;
-        }
-        
-        // Otherwise, use local packet handling
-        if (!autoBlock.blinking) {
-            return;
-        }
-        if (e.getPacket().getClass().getSimpleName().startsWith("S")) return;
-        
-        autoBlock.blinkedPackets.add(e.getPacket());
-        e.setCanceled(true);
     }
 
     @SubscribeEvent
@@ -917,7 +862,7 @@ public class KillAura extends IAutoClicker {
 
     @Override
     public boolean click() {
-        if (useAutoClickerSettings.isToggled() && ModuleManager.autoClicker != null && ModuleManager.autoClicker.isEnabled()) {
+        if (useAutoClickerSettings.isToggled() && ModuleManager.autoClicker != null && ModuleManager.autoClicker.isActive()) {
             if (target != null && mc.thePlayer.getDistanceToEntity(target) <= swingRange.getInput()) {
                 if (mc.currentScreen == null && HitSelect.canAttack()) {
                     // Hypixel mode: cancel attack if blocking state doesn't allow

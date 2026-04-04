@@ -65,6 +65,20 @@ public class RotationUtils {
 
         return new float[] { yaw, pitch };
     }
+
+    /**
+     * Get absolute rotations to an exact world-space point.
+     */
+    public static float[] getRotationsToVec(Vec3 vec3) {
+        double x = vec3.xCoord - mc.thePlayer.posX;
+        double y = vec3.yCoord - (mc.thePlayer.posY + mc.thePlayer.getEyeHeight());
+        double z = vec3.zCoord - mc.thePlayer.posZ;
+
+        double distance = MathHelper.sqrt_double(x * x + z * z);
+        float yaw = (float) Math.toDegrees(Math.atan2(z, x)) - 90.0F;
+        float pitch = (float) -Math.toDegrees(Math.atan2(y, distance));
+        return new float[]{MathHelper.wrapAngleTo180_float(yaw), clampTo90(pitch)};
+    }
     
     /**
      * Set fake rotations (copied from reference for Scaffold compatibility)
@@ -186,6 +200,57 @@ public class RotationUtils {
         outPitch = n4 + (float) (Math.round((double) (outPitch - n4) / gcd) * gcd);
 
         return new float[]{outYaw, clampTo90(outPitch)};
+    }
+
+    public static float getMouseGCD() {
+        float sensitivity = mc.gameSettings.mouseSensitivity * 0.6f + 0.2f;
+        return sensitivity * sensitivity * sensitivity * 1.2f;
+    }
+
+    public static float quantizeToMouseGcd(float value) {
+        float gcd = getMouseGCD();
+        if (gcd <= 0.0F) {
+            return value;
+        }
+        return Math.round(value / gcd) * gcd;
+    }
+
+    /**
+     * Step a rotation toward a target using sensitivity-aligned deltas.
+     * Returns {yaw, pitch, yawVelocity, pitchVelocity}.
+     */
+    public static float[] stepTowardTarget(float currentYaw, float currentPitch, float targetYaw, float targetPitch,
+                                           float yawVelocity, float pitchVelocity,
+                                           float maxYawStep, float maxPitchStep,
+                                           float accel, float stopThreshold) {
+        float yawDiff = normalize(targetYaw - currentYaw);
+        float pitchDiff = targetPitch - currentPitch;
+
+        float desiredYawStep = MathHelper.clamp_float(yawDiff, -maxYawStep, maxYawStep);
+        float desiredPitchStep = MathHelper.clamp_float(pitchDiff, -maxPitchStep, maxPitchStep);
+
+        float gcd = getMouseGCD();
+        desiredYawStep = Math.round(desiredYawStep / gcd) * gcd;
+        desiredPitchStep = Math.round(desiredPitchStep / gcd) * gcd;
+
+        float nextYawVelocity = yawVelocity + (desiredYawStep - yawVelocity) * accel;
+        float nextPitchVelocity = pitchVelocity + (desiredPitchStep - pitchVelocity) * accel;
+
+        float quantizedYaw = Math.round(nextYawVelocity / gcd) * gcd;
+        float quantizedPitch = Math.round(nextPitchVelocity / gcd) * gcd;
+
+        if (Math.abs(yawDiff) <= stopThreshold) {
+            quantizedYaw = 0.0F;
+            nextYawVelocity = 0.0F;
+        }
+        if (Math.abs(pitchDiff) <= stopThreshold) {
+            quantizedPitch = 0.0F;
+            nextPitchVelocity = 0.0F;
+        }
+
+        float nextYaw = MathHelper.wrapAngleTo180_float(currentYaw + quantizedYaw);
+        float nextPitch = clampTo90(currentPitch + quantizedPitch);
+        return new float[]{nextYaw, nextPitch, nextYawVelocity, nextPitchVelocity};
     }
 
     public static float angle(final double n, final double n2) {

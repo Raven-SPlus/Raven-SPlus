@@ -149,44 +149,72 @@ public class Module {
         return this.canBeEnabled;
     }
 
+    private boolean hasSilentUsers() {
+        synchronized (silentUsers) {
+            return !silentUsers.isEmpty();
+        }
+    }
+
+    private void activateRuntime() {
+        if (this.script != null) {
+            Raven.scriptManager.onEnable(script);
+            return;
+        }
+
+        try {
+            FMLCommonHandler.instance().bus().register(this);
+            this.onEnable();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void deactivateRuntime() {
+        if (this.script != null) {
+            Raven.scriptManager.onDisable(script);
+            return;
+        }
+
+        try {
+            FMLCommonHandler.instance().bus().unregister(this);
+            this.onDisable();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void updateRuntimeState(boolean wasActive) {
+        boolean isActive = this.isActive();
+        if (wasActive == isActive) {
+            return;
+        }
+
+        if (isActive) {
+            activateRuntime();
+        } else {
+            deactivateRuntime();
+        }
+    }
+
     public final void enable() {
         if (!this.canBeEnabled() || this.isEnabled()) {
             return;
         }
+        boolean wasActive = this.isActive();
         this.setEnabled(true);
         ModuleManager.organizedModules.add(this);
         if (ModuleManager.hud.isEnabled()) {
             ModuleManager.sort();
         }
-
-        if (this.script != null) {
-            Raven.scriptManager.onEnable(script);
-        }
-        else {
-            try {
-                FMLCommonHandler.instance().bus().register(this);
-                this.onEnable();
-            } catch (Throwable ignored) {
-            }
-        }
+        updateRuntimeState(wasActive);
     }
 
     public final void disable() {
         if (!this.isEnabled()) {
             return;
         }
+        boolean wasActive = this.isActive();
         this.setEnabled(false);
         ModuleManager.organizedModules.remove(this);
-        if (this.script != null) {
-            Raven.scriptManager.onDisable(script);
-        }
-        else {
-            try {
-                FMLCommonHandler.instance().bus().unregister(this);
-                this.onDisable();
-            } catch (Throwable ignored) {
-            }
-        }
+        updateRuntimeState(wasActive);
     }
     
     /**
@@ -196,21 +224,15 @@ public class Module {
      */
     public void useSilently(Module user) {
         if (user == null) return;
+        boolean shouldActivate = false;
         synchronized (silentUsers) {
-            boolean wasEmpty = silentUsers.isEmpty();
+            boolean wasActive = this.enabled || !silentUsers.isEmpty();
             silentUsers.add(user);
-            
-            // If this is the first silent user and module isn't enabled, activate functionality
-            if (wasEmpty && !this.isEnabled()) {
-                try {
-                    // Only register if not already registered (check if enabled first)
-                    if (!this.isEnabled()) {
-                        FMLCommonHandler.instance().bus().register(this);
-                        this.onEnable();
-                    }
-                } catch (Throwable ignored) {
-                }
-            }
+            shouldActivate = !wasActive && (this.enabled || !silentUsers.isEmpty());
+        }
+
+        if (shouldActivate) {
+            activateRuntime();
         }
     }
     
@@ -220,17 +242,15 @@ public class Module {
      */
     public void stopUsingSilently(Module user) {
         if (user == null) return;
+        boolean shouldDeactivate = false;
         synchronized (silentUsers) {
+            boolean wasActive = this.enabled || !silentUsers.isEmpty();
             silentUsers.remove(user);
-            
-            // If no more silent users and module isn't enabled, deactivate functionality
-            if (silentUsers.isEmpty() && !this.isEnabled()) {
-                try {
-                    FMLCommonHandler.instance().bus().unregister(this);
-                    this.onDisable();
-                } catch (Throwable ignored) {
-                }
-            }
+            shouldDeactivate = wasActive && !this.enabled && silentUsers.isEmpty();
+        }
+
+        if (shouldDeactivate) {
+            deactivateRuntime();
         }
     }
     
@@ -239,9 +259,7 @@ public class Module {
      * @return true if being used silently
      */
     public boolean isUsedSilently() {
-        synchronized (silentUsers) {
-            return !silentUsers.isEmpty();
-        }
+        return hasSilentUsers();
     }
     
     /**
@@ -249,7 +267,7 @@ public class Module {
      * @return true if the module is active
      */
     public boolean isActive() {
-        return this.isEnabled() || isUsedSilently();
+        return this.isEnabled() || hasSilentUsers();
     }
 
     public String getInfo() {

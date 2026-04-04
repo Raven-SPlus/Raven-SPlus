@@ -24,6 +24,8 @@ import java.util.List;
 
 @Mixin(GuiScreen.class)
 public abstract class MixinGuiScreen {
+    @Shadow
+    protected Minecraft mc;
 
     @Shadow
     protected List<GuiButton> buttonList;
