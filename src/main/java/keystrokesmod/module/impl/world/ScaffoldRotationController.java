@@ -29,7 +29,7 @@ final class ScaffoldRotationController {
                     float pitch = currentFacePitch();
                     return new RotationData(yaw, pitch);
                 },
-                this::computeOffsetRotation,
+                (placeYaw, placePitch, forceStrict, event) -> computeOffsetRotation(event, forceStrict),
                 (placeYaw, placePitch, forceStrict, event) -> {
                     float yaw = state.blockRotations != null ? state.blockRotations[0] : RotationHandler.getRotationYaw() - scaffold.hardcodedYaw();
                     float pitch = state.blockRotations != null ? state.blockRotations[1] : 80F;
