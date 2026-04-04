@@ -20,9 +20,6 @@ public class ClientTheme extends Module {
     public final ButtonSetting background;
     public final ButtonSetting mainMenu;
     public final ButtonSetting clickGui;
-    public final ButtonSetting inWorldMenus;
-    public final ButtonSetting inWorldMenuBlur;
-    public final SliderSetting inWorldMenuBlurStrength;
     public final ButtonSetting test;
     public final ModeSetting colorType;
     public final SliderSetting red1;
@@ -46,9 +43,6 @@ public class ClientTheme extends Module {
         this.registerSetting(background = new ButtonSetting("Background", true));
         this.registerSetting(mainMenu = new ButtonSetting("Main menu", true));
         this.registerSetting(clickGui = new ButtonSetting("ClickGui", true));
-        this.registerSetting(inWorldMenus = new ButtonSetting("In-world menus", false, background::isToggled));
-        this.registerSetting(inWorldMenuBlur = new ButtonSetting("In-world menu blur", false, inWorldMenus::isToggled));
-        this.registerSetting(inWorldMenuBlurStrength = new SliderSetting("In-world blur strength", 18, 1, 64, 1, () -> inWorldMenus.isToggled() && inWorldMenuBlur.isToggled()));
         this.registerSetting(test = new ButtonSetting("Test", false, clickGui::isToggled));
         this.registerSetting(new DescriptionSetting("Custom Theme"));
         this.registerSetting(colorType = new ModeSetting("Color type", new String[]{"Single", "Double", "Triple"}, 0));

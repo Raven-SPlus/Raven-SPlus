@@ -7,13 +7,10 @@ import keystrokesmod.module.impl.player.ChestStealer;
 import keystrokesmod.utility.Utils;
 import keystrokesmod.utility.render.BackgroundUtils;
 import keystrokesmod.utility.render.blur.BlurStencilProvider;
-import keystrokesmod.utility.render.blur.GaussianBlur;
 import keystrokesmod.utility.render.blur.GlobalBlurManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiButton;
-import net.minecraft.client.gui.GuiIngameMenu;
 import net.minecraft.client.gui.GuiScreen;
-import net.minecraft.client.gui.inventory.GuiInventory;
 import org.jetbrains.annotations.NotNull;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Mixin;
@@ -33,9 +30,6 @@ public abstract class MixinGuiScreen {
     @Shadow
     protected List<GuiButton> buttonList;
 
-    @Shadow
-    protected abstract void drawGradientRect(int left, int top, int right, int bottom, int startColor, int endColor);
-
     @Unique
     private boolean ravenAPlus$batchedButtonBlurDone;
 
@@ -50,18 +44,7 @@ public abstract class MixinGuiScreen {
         if (!ModuleManager.clientTheme.isEnabled() || !ModuleManager.clientTheme.background.isToggled())
             return;
 
-        GuiScreen screen = (GuiScreen) (Object) this;
-        if (ravenAPlus$shouldRenderInWorldMenuBlur(screen)) {
-            int blurRadius = (int) ModuleManager.clientTheme.inWorldMenuBlurStrength.getInput();
-            GaussianBlur.startBlur();
-            screen.drawRect(0, 0, screen.width, screen.height, -1);
-            GaussianBlur.endBlur(blurRadius, blurRadius / 4.0f);
-            drawGradientRect(0, 0, screen.width, screen.height, 0x50000000, 0x78000000);
-            ci.cancel();
-            return;
-        }
-
-        BackgroundUtils.renderBackground(screen);
+        BackgroundUtils.renderBackground((GuiScreen) (Object) this);
         ci.cancel();
     }
 
@@ -113,19 +96,5 @@ public abstract class MixinGuiScreen {
 
         // Normal draw (our GuiButton mixin may cancel and render themed buttons here).
         button.drawButton(minecraft, mouseX, mouseY);
-    }
-
-    @Unique
-    private boolean ravenAPlus$shouldRenderInWorldMenuBlur(@NotNull GuiScreen screen) {
-        if (!Utils.nullCheck() || mc.theWorld == null) {
-            return false;
-        }
-        if (!ModuleManager.clientTheme.inWorldMenus.isToggled() || !ModuleManager.clientTheme.inWorldMenuBlur.isToggled()) {
-            return false;
-        }
-        if (NoBackground.noRender() || ChestStealer.noChestRender()) {
-            return false;
-        }
-        return screen instanceof GuiInventory || screen instanceof GuiIngameMenu;
     }
 }
