@@ -7,6 +7,7 @@ import keystrokesmod.utility.RotationUtils;
 import keystrokesmod.utility.aim.AimSimulator;
 import keystrokesmod.utility.aim.RotationData;
 import net.minecraft.util.MathHelper;
+import net.minecraft.util.MovingObjectPosition;
 
 final class ScaffoldRotationController {
     private final Scaffold scaffold;
@@ -23,55 +24,80 @@ final class ScaffoldRotationController {
         this.movementController = movementController;
         this.rotations = new ScaffoldRotationMode[]{
                 (placeYaw, placePitch, forceStrict, event) -> new RotationData(event.getYaw(), event.getPitch()),
-                (placeYaw, placePitch, forceStrict, event) -> {
-                    float clientYaw = RotationHandler.getRotationYaw();
-                    float yaw = clientYaw - scaffold.hardcodedYaw();
-                    float pitch = currentFacePitch();
-                    return new RotationData(yaw, pitch);
-                },
-                (placeYaw, placePitch, forceStrict, event) -> computeOffsetRotation(event, forceStrict),
-                (placeYaw, placePitch, forceStrict, event) -> {
-                    float yaw = state.blockRotations != null ? state.blockRotations[0] : RotationHandler.getRotationYaw() - scaffold.hardcodedYaw();
-                    float pitch = state.blockRotations != null ? state.blockRotations[1] : 80F;
-                    return new RotationData(yaw, pitch);
-                }
+                (placeYaw, placePitch, forceStrict, event) -> computeSteppedRotation(false, event),
+                (placeYaw, placePitch, forceStrict, event) -> computeSteppedRotation(false, event),
+                (placeYaw, placePitch, forceStrict, event) -> computeSteppedRotation(true, event)
         };
     }
 
     void resetForEnable() {
         hasVisualRotation = false;
+        state.hasServerRotation = false;
+        state.hasTargetRotation = false;
+        state.rotationReady = false;
+        state.raytraceReady = false;
     }
 
     void applyPreMotion(PreMotionEvent event) {
         int mode = Math.max(0, Math.min(rotations.length - 1, (int) scaffold.rotation.getInput()));
-        RotationData data = rotations[mode].onRotation(scaffold.placeYaw, scaffold.placePitch, false,
+        RotationData data = rotations[mode].onRotation(scaffold.placeYaw, scaffold.placePitch, mode == 3,
                 new RotationEvent(event.getYaw(), event.getPitch(), RotationHandler.MoveFix.None));
-        event.setYaw(data.getYaw());
-        event.setPitch(data.getPitch());
+        float targetYaw = data.getYaw();
+        float targetPitch = data.getPitch();
+
+        event.setYaw(targetYaw);
+        event.setPitch(movementController.clampPitch(targetPitch));
 
         movementController.applyJumpFacingForward(event, RotationHandler.getRotationYaw());
-        event.setPitch(movementController.clampPitch(event.getPitch()));
+        targetYaw = event.getYaw();
+        targetPitch = event.getPitch();
+
+        state.serverYaw = MathHelper.wrapAngleTo180_float(targetYaw);
+        state.serverPitch = movementController.clampPitch(targetPitch);
+        state.scaffoldYaw = state.serverYaw;
+        state.scaffoldPitch = state.serverPitch;
+        state.hasServerRotation = mode > 0;
+
+        updateRaytraceReadiness(mode);
+
+        if (mode == 0) {
+            RotationUtils.serverRotations[0] = targetYaw;
+            RotationUtils.serverRotations[1] = event.getPitch();
+            hasVisualRotation = false;
+            return;
+        }
 
         smoothVisualRotation(event);
-        RotationUtils.serverRotations[0] = event.getYaw();
-        RotationUtils.serverRotations[1] = event.getPitch();
+        RotationUtils.serverRotations[0] = state.serverYaw;
+        RotationUtils.serverRotations[1] = state.serverPitch;
     }
 
     void applyMoveFix(RotationEvent event) {
         if (!scaffold.stopRotation()) {
             return;
         }
-        event.setMoveFix(RotationHandler.MoveFix.Continuous);
+        event.setMoveFix(scaffold.rotation.getInput() >= 3
+                ? RotationHandler.MoveFix.Strict
+                : RotationHandler.MoveFix.Continuous);
+        event.noSmoothBack();
     }
 
     boolean canSchedulePlace() {
-        int mode = Math.max(0, Math.min(rotations.length - 1, (int) scaffold.rotation.getInput()));
-        return rotations[mode].onPreSchedulePlace();
+        if (scaffold.rotation.getInput() <= 0) {
+            return true;
+        }
+        if (!state.hasTargetRotation || !state.rotationReady) {
+            return false;
+        }
+        if (scaffold.rotation.getInput() >= 3) {
+            return state.raytraceReady;
+        }
+        return state.raytraceReady || state.ticksSincePlace > 2;
     }
 
     private void smoothVisualRotation(PreMotionEvent event) {
-        float targetYaw = event.getYaw();
-        float targetPitch = event.getPitch();
+        float targetYaw = state.serverYaw;
+        float targetPitch = state.serverPitch;
 
         if (!hasVisualRotation) {
             lastVisualYaw = targetYaw;
@@ -79,151 +105,85 @@ final class ScaffoldRotationController {
             hasVisualRotation = true;
         }
 
-        lastVisualYaw = AimSimulator.rotMove(lastVisualYaw, targetYaw, 30F);
-        lastVisualPitch = AimSimulator.rotMove(lastVisualPitch, targetPitch, 30F);
+        float smoothSpeed = scaffold.rotation.getInput() >= 3 ? 18F : 24F;
+        lastVisualYaw = AimSimulator.rotMove(lastVisualYaw, targetYaw, smoothSpeed);
+        lastVisualPitch = AimSimulator.rotMove(lastVisualPitch, targetPitch, smoothSpeed * 0.8F);
         event.setYaw(lastVisualYaw);
         event.setPitch(lastVisualPitch);
     }
 
-    private float currentFacePitch() {
-        float pitch = 79F;
-        if (scaffold.getCurrentFace() == 1) {
-            pitch = 87F;
+    private RotationData computeSteppedRotation(boolean strict, RotationEvent event) {
+        float currentYaw = state.hasServerRotation ? state.serverYaw : RotationHandler.getRotationYaw(event.getYaw());
+        float currentPitch = state.hasServerRotation ? state.serverPitch : RotationHandler.getRotationPitch(event.getPitch());
+        float fallbackYaw = MathHelper.wrapAngleTo180_float(currentYaw - scaffold.hardcodedYaw());
+        float fallbackPitch = scaffold.getCurrentFace() == 1 ? 84.5F : 80.0F;
+
+        float targetYaw = fallbackYaw;
+        float targetPitch = fallbackPitch;
+        if (state.blockRotations != null) {
+            targetYaw = state.blockRotations[0];
+            targetPitch = state.blockRotations[1];
         }
-        return pitch;
+
+        if (state.rotateForward && scaffold.jumpFacingForwardEnabled()) {
+            targetYaw = MathHelper.wrapAngleTo180_float(RotationHandler.getRotationYaw(event.getYaw()) - scaffold.hardcodedYaw() - 180F);
+            targetPitch = 10F;
+        } else if (!strict) {
+            float motionYaw = movementController.getMotionYaw();
+            float yawDiffToMotion = Math.abs(MathHelper.wrapAngleTo180_float(targetYaw - motionYaw));
+            if (keystrokesmod.utility.Utils.isMoving() && yawDiffToMotion > 120F) {
+                targetYaw = motionYaw - 120F * Math.signum(MathHelper.wrapAngleTo180_float(motionYaw - targetYaw));
+            }
+            targetPitch = Math.max(targetPitch, 73.0F);
+        } else {
+            targetPitch = Math.max(targetPitch, 78.0F);
+        }
+
+        state.targetYaw = MathHelper.wrapAngleTo180_float(targetYaw);
+        state.targetPitch = movementController.clampPitch(targetPitch);
+        state.hasTargetRotation = true;
+
+        float[] stepped = RotationUtils.stepTowardTarget(
+                currentYaw,
+                currentPitch,
+                state.targetYaw,
+                state.targetPitch,
+                state.yawVelocity,
+                state.pitchVelocity,
+                strict ? 8.5F : 16.5F,
+                strict ? 6.5F : 11.5F,
+                strict ? 0.35F : 0.55F,
+                strict ? 0.18F : 0.30F
+        );
+
+        state.yawVelocity = stepped[2];
+        state.pitchVelocity = stepped[3];
+
+        float serverYaw = stepped[0];
+        float serverPitch = movementController.clampPitch(stepped[1]);
+
+        float yawDiff = Math.abs(MathHelper.wrapAngleTo180_float(state.targetYaw - serverYaw));
+        float pitchDiff = Math.abs(state.targetPitch - serverPitch);
+        state.rotationReady = yawDiff <= (strict ? 2.25F : 6.0F) && pitchDiff <= (strict ? 1.75F : 4.0F);
+
+        return new RotationData(serverYaw, serverPitch);
     }
 
-    private RotationData computeOffsetRotation(RotationEvent event, boolean forceStrict) {
-        float clientYaw = RotationHandler.getRotationYaw();
-        float moveAngle = (float) scaffold.getMovementAngle();
-        float relativeYaw = clientYaw + moveAngle;
-        float normalizedYaw = (relativeYaw % 360 + 360) % 360;
-        float quad = normalizedYaw % 90;
-        float side = MathHelper.wrapAngleTo180_float(movementController.getMotionYaw() - state.scaffoldYaw);
-        float yawBackwards = MathHelper.wrapAngleTo180_float(clientYaw) - scaffold.hardcodedYaw();
-        float blockYawOffset = MathHelper.wrapAngleTo180_float(yawBackwards - state.blockYaw);
-
-        if (quad <= 5 || quad >= 85) {
-            state.yawAngle = 127.40F;
-            state.minOffset = 13F;
-            state.minPitch = 75.48F;
-        }
-        if (quad > 5 && quad <= 15 || quad >= 75 && quad < 85) {
-            state.yawAngle = 128.55F;
-            state.minOffset = 11F;
-            state.minPitch = 75.74F;
-        }
-        if (quad > 15 && quad <= 25 || quad >= 65 && quad < 75) {
-            state.yawAngle = 129.70F;
-            state.minOffset = 8F;
-            state.minPitch = 75.95F;
-        }
-        if (quad > 25 && quad <= 32 || quad >= 58 && quad < 65) {
-            state.yawAngle = 130.85F;
-            state.minOffset = 6F;
-            state.minPitch = 76.13F;
-        }
-        if (quad > 32 && quad <= 38 || quad >= 52 && quad < 58) {
-            state.yawAngle = 131.80F;
-            state.minOffset = 5F;
-            state.minPitch = 76.41F;
-        }
-        if (quad > 38 && quad <= 42 || quad >= 48 && quad < 52) {
-            state.yawAngle = 134.30F;
-            state.minOffset = 4F;
-            state.minPitch = 77.54F;
-        }
-        if (quad > 42 && quad <= 45 || quad >= 45 && quad < 48) {
-            state.yawAngle = 137.85F;
-            state.minOffset = 3F;
-            state.minPitch = 77.93F;
+    private void updateRaytraceReadiness(int mode) {
+        if (mode <= 0 || state.currentPlacement == null) {
+            state.raytraceReady = true;
+            return;
         }
 
-        if (state.enabledOffGround) {
-            if (state.blockRotations != null) {
-                state.scaffoldYaw = state.blockRotations[0];
-                state.scaffoldPitch = state.blockRotations[1];
-            } else {
-                state.scaffoldYaw = clientYaw - scaffold.hardcodedYaw();
-                state.scaffoldPitch = 78F;
-            }
-            return new RotationData(state.scaffoldYaw, state.scaffoldPitch);
-        }
+        MovingObjectPosition raycast = RotationUtils.rayTraceCustom(
+                RotationUtils.mc.playerController.getBlockReachDistance(),
+                state.serverYaw,
+                state.serverPitch
+        );
 
-        if (state.blockRotations != null) {
-            state.blockYaw = state.blockRotations[0];
-            state.scaffoldPitch = Math.max(state.blockRotations[1], state.minPitch);
-            state.yawOffset = blockYawOffset;
-        } else {
-            state.scaffoldPitch = state.minPitch;
-            if (state.edge == 1) {
-                state.firstStroke = System.currentTimeMillis();
-            }
-            state.yawOffset = 0;
-        }
-
-        if (!keystrokesmod.utility.Utils.isMoving() || keystrokesmod.utility.Utils.getHorizontalSpeed() == 0.0D) {
-            return new RotationData(state.theYaw, state.scaffoldPitch);
-        }
-
-        float motionYaw = movementController.getMotionYaw();
-        float newYaw = motionYaw - state.yawAngle * Math.signum(MathHelper.wrapAngleTo180_float(motionYaw - state.scaffoldYaw));
-        state.scaffoldYaw = MathHelper.wrapAngleTo180_float(newYaw);
-
-        if (quad > 5 && quad < 85) {
-            if (quad < 45F) {
-                if (state.firstStroke == 0) {
-                    state.set2 = side < 0;
-                }
-                if (state.was452) {
-                    state.firstStroke = System.currentTimeMillis();
-                }
-                state.was451 = true;
-                state.was452 = false;
-            } else {
-                if (state.firstStroke == 0) {
-                    state.set2 = side >= 0;
-                }
-                if (state.was451) {
-                    state.firstStroke = System.currentTimeMillis();
-                }
-                state.was452 = true;
-                state.was451 = false;
-            }
-        }
-
-        double minSwitch = !keystrokesmod.utility.scaffold.ScaffoldUtils.scaffoldDiagonal(false) ? 9 : 15;
-        if (side >= 0) {
-            if (state.yawOffset <= 0 && state.firstStroke == 0 && quad <= 5 || quad >= 85) {
-                if (state.yawOffset <= -minSwitch && !state.set2) {
-                    state.firstStroke = System.currentTimeMillis();
-                    state.set2 = false;
-                }
-            } else if (state.yawOffset >= minSwitch && state.firstStroke == 0 && quad <= 5 || quad >= 85) {
-                if (!state.set2) {
-                    state.firstStroke = System.currentTimeMillis();
-                }
-                state.set2 = true;
-            }
-            if (state.set2) {
-                state.yawOffset = Math.max(0, Math.min(state.minOffset, state.yawOffset));
-                state.theYaw = (state.scaffoldYaw + state.yawAngle * 2) - state.yawOffset;
-                return new RotationData(state.theYaw, state.scaffoldPitch);
-            }
-        } else {
-            if (state.set2) {
-                state.yawOffset = Math.min(0, Math.max(-state.minOffset, state.yawOffset));
-                state.theYaw = (state.scaffoldYaw - state.yawAngle * 2) - state.yawOffset;
-                return new RotationData(state.theYaw, state.scaffoldPitch);
-            }
-        }
-
-        if (side >= 0) {
-            state.yawOffset = Math.max(-state.minOffset, Math.min(0, state.yawOffset));
-        } else {
-            state.yawOffset = Math.min(state.minOffset, Math.max(0, state.yawOffset));
-        }
-        state.theYaw = state.scaffoldYaw - state.yawOffset;
-        return new RotationData(state.theYaw, state.scaffoldPitch);
+        state.raytraceReady = raycast != null
+                && raycast.typeOfHit == MovingObjectPosition.MovingObjectType.BLOCK
+                && raycast.getBlockPos().equals(state.currentPlacement.blockPos)
+                && raycast.sideHit == state.currentPlacement.enumFacing;
     }
 }

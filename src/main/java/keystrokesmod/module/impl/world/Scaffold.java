@@ -194,6 +194,11 @@ public class Scaffold extends Module {
         movementController.onPreMotion();
         movementController.handleFastScaffoldJump();
         movementController.handleFloat(event);
+        if (holdingBlocks()) {
+            placementPlanner.preparePlacement(0, 0);
+        } else {
+            clearPlacementPlan();
+        }
         placementPlanner.updateBlockRotations();
         rotationController.applyPreMotion(event);
         movementController.afterRotationApplied();
@@ -238,15 +243,19 @@ public class Scaffold extends Module {
 
         if (holdingBlocks() && setSlot()) {
             hasSwapped = true;
-            if (rotationController.canSchedulePlace() && (rotation.getInput() == 0 || state.rotationDelay == 0)) {
-                placeBlock(0, 0);
-            } else if (state.currentPlacement == null) {
+            if (state.currentPlacement == null) {
                 placementPlanner.preparePlacement(0, 0);
+            }
+            if (state.placeCooldownTicks <= 0
+                    && state.currentPlacement != null
+                    && rotationController.canSchedulePlace()
+                    && (rotation.getInput() == 0 || state.rotationDelay == 0)) {
+                placeBlock(0, 0);
             }
             movementController.handleKeepYPlacement();
             movementController.handleMotionScale();
         } else {
-            state.currentPlacement = null;
+            clearPlacementPlan();
         }
 
         syncPublicState();
@@ -359,6 +368,9 @@ public class Scaffold extends Module {
     }
 
     public void placeBlock(int yOffset, int xOffset) {
+        if (state.placeCooldownTicks > 0) {
+            return;
+        }
         PlaceData placeData = placementPlanner.preparePlacement(yOffset, xOffset);
         syncPublicState();
         if (placeData == null) {
@@ -369,6 +381,9 @@ public class Scaffold extends Module {
         place(placeData);
 
         if (sprint.getInput() == 0 && mc.thePlayer.onGround && !ModuleManager.tower.canTower() && !usingFastScaffold()) {
+            return;
+        }
+        if (isGrimLegitMotion() || !state.lastPlaceSuccessful || state.placeCooldownTicks > 0) {
             return;
         }
 
@@ -533,11 +548,22 @@ public class Scaffold extends Module {
     }
 
     public boolean isGrimLegitMotion() {
-        return false;
+        return moduleEnabled && rotation.getInput() >= 3;
     }
 
     private boolean isModuleActive() {
         return Utils.nullCheck() && isEnabled;
+    }
+
+    private void clearPlacementPlan() {
+        state.currentPlacement = null;
+        state.targetBlock = null;
+        state.hitVec = null;
+        state.lookVec = null;
+        state.blockRotations = null;
+        state.hasTargetRotation = false;
+        state.rotationReady = false;
+        state.raytraceReady = false;
     }
 
     private void syncPublicState() {

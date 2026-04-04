@@ -6,6 +6,7 @@ import net.minecraft.util.Vec3;
 final class ScaffoldSessionState {
     int blockSlot = -1;
     boolean hasPlaced;
+    boolean lastPlaceSuccessful;
 
     Scaffold.PlaceData currentPlacement;
     Scaffold.PlaceData lastPlacement;
@@ -17,8 +18,19 @@ final class ScaffoldSessionState {
 
     float scaffoldYaw;
     float scaffoldPitch;
-    float blockYaw;
-    float yawOffset;
+    float targetYaw;
+    float targetPitch;
+    float serverYaw;
+    float serverPitch;
+    float yawVelocity;
+    float pitchVelocity;
+    boolean hasTargetRotation;
+    boolean hasServerRotation;
+    boolean rotationReady;
+    boolean raytraceReady;
+    int placeCooldownTicks;
+    int ticksSincePlace;
+    int keepYJitterTicks;
 
     boolean rotateForward;
     double startYPos = -1;
@@ -34,28 +46,15 @@ final class ScaffoldSessionState {
     boolean floatWasEnabled;
     boolean floatKeepY;
 
-    float minOffset;
-    float minPitch = 80F;
-    float edge = -999999929F;
-    long firstStroke;
-    float lastEdge2;
-    float yawAngle;
-    float theYaw;
-    boolean set2;
-    boolean was451;
-    boolean was452;
-
     int scaffoldTicks;
     boolean enabledOffGround;
     boolean canBlockFade;
 
     void resetForEnable(float clientYaw, boolean offGround) {
-        edge = -999999929F;
-        minPitch = 80F;
         enabledOffGround = offGround;
         rotationDelay = offGround ? 2 : 0;
-        lastEdge2 = clientYaw;
         hasPlaced = false;
+        lastPlaceSuccessful = false;
         currentPlacement = null;
         lastPlacement = null;
         lastPlacedFacing = null;
@@ -63,6 +62,21 @@ final class ScaffoldSessionState {
         hitVec = null;
         lookVec = null;
         blockRotations = null;
+        scaffoldYaw = clientYaw;
+        scaffoldPitch = 80F;
+        targetYaw = clientYaw;
+        targetPitch = 80F;
+        serverYaw = clientYaw;
+        serverPitch = 80F;
+        yawVelocity = 0F;
+        pitchVelocity = 0F;
+        hasTargetRotation = false;
+        hasServerRotation = false;
+        rotationReady = false;
+        raytraceReady = false;
+        placeCooldownTicks = 0;
+        ticksSincePlace = Integer.MAX_VALUE;
+        keepYJitterTicks = -1;
         rotateForward = false;
         startYPos = -1;
         fastScaffoldKeepY = false;
@@ -74,19 +88,13 @@ final class ScaffoldSessionState {
         floatStarted = false;
         floatWasEnabled = false;
         floatKeepY = false;
-        minOffset = 0F;
-        firstStroke = 0L;
-        yawAngle = 0F;
-        theYaw = 0F;
-        set2 = false;
-        was451 = false;
-        was452 = false;
         scaffoldTicks = 0;
         canBlockFade = false;
     }
 
     void resetAfterDisable() {
         hasPlaced = false;
+        lastPlaceSuccessful = false;
         currentPlacement = null;
         lastPlacement = null;
         lastPlacedFacing = null;
@@ -94,6 +102,15 @@ final class ScaffoldSessionState {
         hitVec = null;
         lookVec = null;
         blockRotations = null;
+        hasTargetRotation = false;
+        hasServerRotation = false;
+        rotationReady = false;
+        raytraceReady = false;
+        placeCooldownTicks = 0;
+        ticksSincePlace = Integer.MAX_VALUE;
+        keepYJitterTicks = -1;
+        yawVelocity = 0F;
+        pitchVelocity = 0F;
         fastScaffoldKeepY = false;
         firstKeepYPlace = false;
         rotateForward = false;
@@ -102,13 +119,10 @@ final class ScaffoldSessionState {
         floatJumped = false;
         floatWasEnabled = false;
         floatKeepY = false;
-        was451 = false;
-        was452 = false;
         enabledOffGround = false;
         rotationDelay = 0;
         keepYTicks = 0;
         scaffoldTicks = 0;
-        firstStroke = 0L;
         startYPos = -1;
         blockSlot = -1;
         lowhop = false;

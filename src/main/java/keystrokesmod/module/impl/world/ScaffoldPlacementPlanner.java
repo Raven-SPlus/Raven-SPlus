@@ -79,24 +79,89 @@ final class ScaffoldPlacementPlanner {
     }
 
     void updateBlockRotations() {
-        if (state.targetBlock == null || state.lookVec == null) {
+        if (state.currentPlacement == null || state.hitVec == null) {
             state.blockRotations = null;
             return;
         }
 
-        Vec3 lookAt = new Vec3(
-                state.targetBlock.xCoord - state.lookVec.xCoord,
-                state.targetBlock.yCoord - state.lookVec.yCoord,
-                state.targetBlock.zCoord - state.lookVec.zCoord
-        );
-        state.blockRotations = RotationUtils.getRotations(lookAt);
+        state.blockRotations = RotationUtils.getRotationsToVec(state.hitVec);
     }
 
     Vec3 createPlacementHitVec(BlockPos blockPos, EnumFacing blockFacing) {
-        double hitX = blockPos.getX() + 0.5D + getCoord(blockFacing.getOpposite(), "x") * 0.5D;
-        double hitY = blockPos.getY() + 0.5D + getCoord(blockFacing.getOpposite(), "y") * 0.5D;
-        double hitZ = blockPos.getZ() + 0.5D + getCoord(blockFacing.getOpposite(), "z") * 0.5D;
-        return new Vec3(hitX, hitY, hitZ);
+        List<Vec3> samples = getPlacementSamples(blockPos, blockFacing);
+        if (samples.isEmpty()) {
+            double hitX = blockPos.getX() + 0.5D + getCoord(blockFacing.getOpposite(), "x") * 0.5D;
+            double hitY = blockPos.getY() + 0.5D + getCoord(blockFacing.getOpposite(), "y") * 0.5D;
+            double hitZ = blockPos.getZ() + 0.5D + getCoord(blockFacing.getOpposite(), "z") * 0.5D;
+            return new Vec3(hitX, hitY, hitZ);
+        }
+
+        float referenceYaw = state.hasServerRotation ? state.serverYaw : RotationHandler.getRotationYaw();
+        float referencePitch = state.hasServerRotation ? state.serverPitch : RotationHandler.getRotationPitch();
+        Vec3 bestSample = samples.get(0);
+        double bestScore = Double.MAX_VALUE;
+
+        for (Vec3 sample : samples) {
+            float[] rotations = RotationUtils.getRotationsToVec(sample);
+            float yawDiff = Math.abs(MathHelper.wrapAngleTo180_float(rotations[0] - referenceYaw));
+            float pitchDiff = Math.abs(rotations[1] - referencePitch);
+            double eyeDistance = mc.thePlayer.getPositionEyes(1.0F).distanceTo(sample);
+            double score = yawDiff + pitchDiff * 1.35D + eyeDistance * 0.15D;
+            if (score < bestScore) {
+                bestScore = score;
+                bestSample = sample;
+            }
+        }
+
+        return bestSample;
+    }
+
+    private List<Vec3> getPlacementSamples(BlockPos blockPos, EnumFacing blockFacing) {
+        double centerX = blockPos.getX() + 0.5D + getCoord(blockFacing.getOpposite(), "x") * 0.5D;
+        double centerY = blockPos.getY() + 0.5D + getCoord(blockFacing.getOpposite(), "y") * 0.5D;
+        double centerZ = blockPos.getZ() + 0.5D + getCoord(blockFacing.getOpposite(), "z") * 0.5D;
+
+        double[][] offsets = {
+                {0.0D, 0.0D},
+                {0.16D, 0.0D},
+                {-0.16D, 0.0D},
+                {0.0D, 0.16D},
+                {0.0D, -0.16D}
+        };
+
+        List<Vec3> samples = new ArrayList<>(offsets.length);
+        for (double[] offset : offsets) {
+            double hitX = centerX;
+            double hitY = centerY;
+            double hitZ = centerZ;
+
+            switch (blockFacing) {
+                case UP:
+                case DOWN:
+                    hitX = clampAxis(centerX + offset[0], blockPos.getX());
+                    hitZ = clampAxis(centerZ + offset[1], blockPos.getZ());
+                    break;
+                case EAST:
+                case WEST:
+                    hitY = clampAxis(centerY + offset[0], blockPos.getY());
+                    hitZ = clampAxis(centerZ + offset[1], blockPos.getZ());
+                    break;
+                case NORTH:
+                case SOUTH:
+                    hitX = clampAxis(centerX + offset[0], blockPos.getX());
+                    hitY = clampAxis(centerY + offset[1], blockPos.getY());
+                    break;
+                default:
+                    break;
+            }
+
+            samples.add(new Vec3(hitX, hitY, hitZ));
+        }
+        return samples;
+    }
+
+    private double clampAxis(double value, int blockAxis) {
+        return Math.max(blockAxis + 0.08D, Math.min(blockAxis + 0.92D, value));
     }
 
     private double getCoord(EnumFacing facing, String axis) {

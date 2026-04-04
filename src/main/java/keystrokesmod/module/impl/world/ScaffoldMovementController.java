@@ -24,6 +24,10 @@ final class ScaffoldMovementController {
             state.scaffoldTicks = 0;
         }
         state.canBlockFade = true;
+        state.ticksSincePlace++;
+        if (state.placeCooldownTicks > 0) {
+            state.placeCooldownTicks--;
+        }
     }
 
     void handleFastScaffoldJump() {
@@ -33,7 +37,8 @@ final class ScaffoldMovementController {
             if (mc.thePlayer.onGround && Utils.isMoving() && state.scaffoldTicks > 1) {
                 scaffold.rotateForward();
                 mc.thePlayer.jump();
-                Utils.setSpeed(scaffold.getSpeed(scaffold.getSpeedLevel()) - Utils.randomizeDouble(0.0003, 0.0001));
+                double variance = scaffold.isGrimLegitMotion() ? Utils.randomizeDouble(0.0012, 0.0030) : Utils.randomizeDouble(0.0003, 0.0001);
+                Utils.setSpeed(scaffold.getSpeed(scaffold.getSpeedLevel()) - variance);
                 if (scaffold.getFastScaffoldMode() == 5 || scaffold.getFastScaffoldMode() == 2 && state.firstKeepYPlace) {
                     state.lowhop = true;
                 }
@@ -61,7 +66,8 @@ final class ScaffoldMovementController {
                     state.startYPos = event.getPosY();
                     mc.thePlayer.jump();
                     if (Utils.isMoving()) {
-                        Utils.setSpeed(scaffold.getSpeed(scaffold.getSpeedLevel()) - Utils.randomizeDouble(0.0003, 0.0001));
+                        double variance = scaffold.isGrimLegitMotion() ? Utils.randomizeDouble(0.0010, 0.0024) : Utils.randomizeDouble(0.0003, 0.0001);
+                        Utils.setSpeed(scaffold.getSpeed(scaffold.getSpeedLevel()) - variance);
                     }
                     state.floatJumped = true;
                 } else if (ScaffoldUtils.groundTicks <= 8 && mc.thePlayer.onGround) {
@@ -76,7 +82,9 @@ final class ScaffoldMovementController {
                 state.floatKeepY = false;
                 state.startYPos = -1;
                 if (scaffold.moduleEnabled) {
-                    event.setPosY(event.getPosY() + ScaffoldUtils.offsetValue);
+                    if (!scaffold.isGrimLegitMotion()) {
+                        event.setPosY(event.getPosY() + ScaffoldUtils.offsetValue);
+                    }
                     if (Utils.isMoving()) {
                         Utils.setSpeed(scaffold.getFloatSpeed(scaffold.getSpeedLevel()));
                     }
@@ -113,10 +121,6 @@ final class ScaffoldMovementController {
     }
 
     void afterRotationApplied() {
-        if (state.edge != 1F) {
-            state.firstStroke = System.currentTimeMillis();
-            state.edge = 1F;
-        }
         if (mc.thePlayer.onGround) {
             state.enabledOffGround = false;
         }
@@ -131,28 +135,40 @@ final class ScaffoldMovementController {
         }
 
         state.keepYTicks++;
+        if (scaffold.isGrimLegitMotion() && state.placeCooldownTicks > 0) {
+            return;
+        }
+
+        if (scaffold.isGrimLegitMotion() && state.keepYJitterTicks < 0) {
+            state.keepYJitterTicks = Utils.randomizeInt(0, 2);
+        }
+        int jitter = scaffold.isGrimLegitMotion() ? Math.max(0, state.keepYJitterTicks) : 0;
+        int tickA = state.firstKeepYPlace ? 7 : 8;
+        int tickB = 11;
+        int tickC = 7;
+        int tickD = 3;
         if ((int) mc.thePlayer.posY > (int) state.startYPos) {
             switch (scaffold.getFastScaffoldMode()) {
                 case 1:
-                    if ((!state.firstKeepYPlace && state.keepYTicks == 8) || state.keepYTicks == 11) {
+                    if ((!state.firstKeepYPlace && state.keepYTicks == tickA + jitter) || state.keepYTicks == tickB + jitter) {
                         scaffold.placeBlock(1, 0);
                         state.firstKeepYPlace = true;
                     }
                     break;
                 case 2:
-                    if ((!state.firstKeepYPlace && state.keepYTicks == 8) || (state.firstKeepYPlace && state.keepYTicks == 7)) {
+                    if ((!state.firstKeepYPlace && state.keepYTicks == tickA + jitter) || (state.firstKeepYPlace && state.keepYTicks == tickC + jitter)) {
                         scaffold.placeBlock(1, 0);
                         state.firstKeepYPlace = true;
                     }
                     break;
                 case 3:
-                    if (!state.firstKeepYPlace && state.keepYTicks == 7) {
+                    if (!state.firstKeepYPlace && state.keepYTicks == tickC + jitter) {
                         scaffold.placeBlock(1, 0);
                         state.firstKeepYPlace = true;
                     }
                     break;
                 case 6:
-                    if (!state.firstKeepYPlace && state.keepYTicks == 3) {
+                    if (!state.firstKeepYPlace && state.keepYTicks == tickD + jitter) {
                         scaffold.placeBlock(1, 0);
                         state.firstKeepYPlace = true;
                     }
@@ -163,6 +179,7 @@ final class ScaffoldMovementController {
         }
         if (mc.thePlayer.onGround) {
             state.keepYTicks = 0;
+            state.keepYJitterTicks = -1;
         }
         if ((int) mc.thePlayer.posY == (int) state.startYPos) {
             state.firstKeepYPlace = false;
@@ -175,7 +192,11 @@ final class ScaffoldMovementController {
         }
         if (Utils.isMoving()) {
             double input = scaffold.getMotionPercent() / 100.0;
-            MoveUtil.strafe(MoveUtil.speed() * input);
+            double targetSpeed = MoveUtil.speed() * input;
+            if (scaffold.isGrimLegitMotion()) {
+                targetSpeed *= 0.985 + Utils.randomizeDouble(0.0, 0.012);
+            }
+            MoveUtil.strafe(targetSpeed);
         }
     }
 

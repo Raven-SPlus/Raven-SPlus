@@ -25,6 +25,7 @@ final class ScaffoldPlacementExecutor {
         ItemStack heldItem = mc.thePlayer.getHeldItem();
         if (heldItem == null || !(heldItem.getItem() instanceof ItemBlock)
                 || !ContainerUtils.canBePlaced((ItemBlock) heldItem.getItem())) {
+            state.lastPlaceSuccessful = false;
             return;
         }
 
@@ -37,14 +38,20 @@ final class ScaffoldPlacementExecutor {
         scaffold.rayCasted = raycast;
         scaffold.placeYaw = RotationUtils.serverRotations[0];
         scaffold.placePitch = RotationUtils.serverRotations[1];
-
-        MovingObjectPosition hitResult;
-        if (raycast != null
+        boolean liveRaytraceMatches = raycast != null
                 && raycast.typeOfHit == MovingObjectPosition.MovingObjectType.BLOCK
                 && raycast.getBlockPos().equals(placeData.blockPos)
-                && raycast.sideHit == placeData.enumFacing) {
+                && raycast.sideHit == placeData.enumFacing;
+
+        MovingObjectPosition hitResult;
+        if (liveRaytraceMatches) {
             hitResult = raycast;
         } else {
+            if (scaffold.rotation.getInput() >= 3) {
+                state.lastPlaceSuccessful = false;
+                state.raytraceReady = false;
+                return;
+            }
             Vec3 hitVec = placeData.hitVec != null
                     ? placeData.hitVec
                     : new Vec3(placeData.blockPos.getX() + 0.5D, placeData.blockPos.getY() + 0.5D, placeData.blockPos.getZ() + 0.5D);
@@ -53,6 +60,7 @@ final class ScaffoldPlacementExecutor {
 
         ScaffoldPlaceEvent event = new ScaffoldPlaceEvent(hitResult, extraPlacement);
         if (MinecraftForge.EVENT_BUS.post(event)) {
+            state.lastPlaceSuccessful = false;
             return;
         }
 
@@ -79,6 +87,13 @@ final class ScaffoldPlacementExecutor {
             }
             scaffold.highlight.put(placement.blockPos.offset(placement.enumFacing), null);
             state.hasPlaced = true;
+            state.lastPlaceSuccessful = true;
+            state.ticksSincePlace = 0;
+            state.placeCooldownTicks = scaffold.isGrimLegitMotion() ? (extraPlacement ? 3 : 2) : (extraPlacement ? 1 : 0);
+            state.raytraceReady = liveRaytraceMatches;
+        } else {
+            state.lastPlaceSuccessful = false;
+            state.placeCooldownTicks = Math.max(state.placeCooldownTicks, scaffold.isGrimLegitMotion() ? 2 : 1);
         }
     }
 }
