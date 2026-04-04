@@ -51,7 +51,6 @@ public class ClickGui extends GuiScreen {
      * to make smooth mouse scrolled
      */
     private int guiYMoveLeft = 0;
-    private int lastMode = 0;
 
     public ClickGui() {
         // Default layout: all tabs on the top of the screen, spread horizontally
@@ -102,21 +101,6 @@ public class ClickGui extends GuiScreen {
     }
 
     public void drawScreen(int x, int y, float p) {
-        int currentMode = (int) ClickGUI.mode.getInput();
-        if (currentMode != lastMode) {
-            lastMode = currentMode;
-            if (currentMode == 0) { // Dropdown
-                resetPosition();
-            } else { // Panel
-                PanelClickGui.init();
-            }
-        }
-
-        if (currentMode == 1) {
-            PanelClickGui.drawScreen(x, y, p, this);
-            return;
-        }
-
         move:
         if (guiYMoveLeft != 0) {
             int step = (int) (guiYMoveLeft * 0.15);
@@ -241,11 +225,6 @@ public class ClickGui extends GuiScreen {
     @Override
     public void handleMouseInput() throws IOException {
         super.handleMouseInput();
-        int currentMode = (int) ClickGUI.mode.getInput();
-        if (currentMode == 1) {
-            PanelClickGui.handleMouseInput();
-            return;
-        }
         int dWheel = Mouse.getDWheel();
         if (dWheel != 0) {
             this.mouseScrolled(dWheel);
@@ -265,11 +244,6 @@ public class ClickGui extends GuiScreen {
 
 
     public void mouseClicked(int x, int y, int m) throws IOException {
-        int currentMode = (int) ClickGUI.mode.getInput();
-        if (currentMode == 1) {
-            PanelClickGui.mouseClicked(x, y, m);
-            return;
-        }
         Iterator<CategoryComponent> var4 = clickHistory.stream()
                 .map(category -> categories.get(category))
                 .iterator();
@@ -315,11 +289,6 @@ public class ClickGui extends GuiScreen {
     }
 
     public void mouseReleased(int x, int y, int s) {
-        int currentMode = (int) ClickGUI.mode.getInput();
-        if (currentMode == 1) {
-            PanelClickGui.mouseReleased(x, y, s);
-            return;
-        }
         if (s == 0) {
             for (CategoryComponent category : categories.values()) {
                 category.d(false);
@@ -334,15 +303,6 @@ public class ClickGui extends GuiScreen {
 
     @Override
     public void keyTyped(char t, int k) {
-        int currentMode = (int) ClickGUI.mode.getInput();
-        if (currentMode == 1) {
-            if (k == Keyboard.KEY_ESCAPE && !binding()) {
-                this.mc.displayGuiScreen(null);
-            } else {
-                PanelClickGui.keyTyped(t, k);
-            }
-            return;
-        }
         if (k == Keyboard.KEY_ESCAPE && !binding()) {
             this.mc.displayGuiScreen(null);
         } else {

@@ -22,7 +22,7 @@ public class ClickGUI extends Module {
 
     public ClickGUI() {
         super("ClickGUI", Module.category.client, 54);
-        this.registerSetting(mode = new ModeSetting("Mode", new String[]{"Dropdown", "Panel"}, 0));
+        this.registerSetting(mode = new ModeSetting("Mode", new String[]{"Dropdown"}, 0));
         this.registerSetting(rainBowOutlines = new ButtonSetting("Rainbow outlines", true));
         this.registerSetting(removePlayerModel = new ButtonSetting("Remove player model", false));
         // Remove watermark by default in the ClickGUI
