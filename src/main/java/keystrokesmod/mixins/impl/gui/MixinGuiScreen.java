@@ -33,6 +33,9 @@ public abstract class MixinGuiScreen {
     @Shadow
     protected List<GuiButton> buttonList;
 
+    @Shadow
+    protected abstract void drawGradientRect(int left, int top, int right, int bottom, int startColor, int endColor);
+
     @Unique
     private boolean ravenAPlus$batchedButtonBlurDone;
 
@@ -53,7 +56,7 @@ public abstract class MixinGuiScreen {
             GaussianBlur.startBlur();
             screen.drawRect(0, 0, screen.width, screen.height, -1);
             GaussianBlur.endBlur(blurRadius, blurRadius / 4.0f);
-            screen.drawGradientRect(0, 0, screen.width, screen.height, 0x50000000, 0x78000000);
+            drawGradientRect(0, 0, screen.width, screen.height, 0x50000000, 0x78000000);
             ci.cancel();
             return;
         }
