@@ -105,9 +105,19 @@ final class ScaffoldRotationController {
             hasVisualRotation = true;
         }
 
-        float smoothSpeed = scaffold.rotation.getInput() >= 3 ? 18F : 24F;
-        lastVisualYaw = AimSimulator.rotMove(lastVisualYaw, targetYaw, smoothSpeed);
-        lastVisualPitch = AimSimulator.rotMove(lastVisualPitch, targetPitch, smoothSpeed * 0.8F);
+        boolean strict = scaffold.rotation.getInput() >= 3;
+        float yawDiff = Math.abs(MathHelper.wrapAngleTo180_float(targetYaw - lastVisualYaw));
+        float pitchDiff = Math.abs(targetPitch - lastVisualPitch);
+
+        if (yawDiff > (strict ? 28F : 20F) || pitchDiff > (strict ? 16F : 12F)) {
+            lastVisualYaw = targetYaw;
+            lastVisualPitch = targetPitch;
+        } else {
+            float smoothSpeed = strict ? 42F : 58F;
+            lastVisualYaw = AimSimulator.rotMove(lastVisualYaw, targetYaw, smoothSpeed);
+            lastVisualPitch = AimSimulator.rotMove(lastVisualPitch, targetPitch, smoothSpeed * 0.9F);
+        }
+
         event.setYaw(lastVisualYaw);
         event.setPitch(lastVisualPitch);
     }
@@ -143,6 +153,21 @@ final class ScaffoldRotationController {
         state.targetPitch = movementController.clampPitch(targetPitch);
         state.hasTargetRotation = true;
 
+        float yawGap = Math.abs(MathHelper.wrapAngleTo180_float(state.targetYaw - currentYaw));
+        float pitchGap = Math.abs(state.targetPitch - currentPitch);
+        boolean fastAcquire = yawGap > (strict ? 32F : 20F) || pitchGap > (strict ? 14F : 10F);
+
+        float maxYawStep = strict
+                ? (fastAcquire ? Math.min(55F, 14F + yawGap * 0.55F) : 20F)
+                : (fastAcquire ? Math.min(78F, 18F + yawGap * 0.80F) : 30F);
+        float maxPitchStep = strict
+                ? (fastAcquire ? Math.min(26F, 8F + pitchGap * 0.70F) : 10F)
+                : (fastAcquire ? Math.min(34F, 10F + pitchGap * 0.90F) : 16F);
+        float accel = strict
+                ? (fastAcquire ? 0.72F : 0.48F)
+                : (fastAcquire ? 0.88F : 0.65F);
+        float stopThreshold = strict ? 0.12F : 0.20F;
+
         float[] stepped = RotationUtils.stepTowardTarget(
                 currentYaw,
                 currentPitch,
@@ -150,10 +175,10 @@ final class ScaffoldRotationController {
                 state.targetPitch,
                 state.yawVelocity,
                 state.pitchVelocity,
-                strict ? 8.5F : 16.5F,
-                strict ? 6.5F : 11.5F,
-                strict ? 0.35F : 0.55F,
-                strict ? 0.18F : 0.30F
+                maxYawStep,
+                maxPitchStep,
+                accel,
+                stopThreshold
         );
 
         state.yawVelocity = stepped[2];
