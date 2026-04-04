@@ -39,7 +39,7 @@ public class GrimACVelocity extends SubMode<Velocity> {
 
     @SubscribeEvent
     public void onPreUpdate(PreUpdateEvent event) {
-        if (ModuleManager.blink.isEnabled()) return;
+        if (keystrokesmod.module.impl.player.Blink.isBlinking()) return;
         if (unReduceTimes > 0 && mc.thePlayer.hurtTime > 0
                 && !(onlyWhileMoving.isToggled() && !MoveUtil.isMoving())
                 && mc.objectMouseOver != null && mc.objectMouseOver.typeOfHit == MovingObjectPosition.MovingObjectType.ENTITY

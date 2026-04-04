@@ -16,7 +16,6 @@ import net.minecraft.network.play.client.*;
 import net.minecraft.network.play.server.S2FPacketSetSlot;
 import net.minecraft.util.BlockPos;
 
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static net.minecraft.util.EnumFacing.DOWN;
@@ -27,13 +26,10 @@ public class KillAuraAutoBlock {
     
     public AtomicBoolean block = new AtomicBoolean();
     public boolean blocking;
-    public boolean blinking;
     public boolean lag;
     public boolean swapped;
     public int asw; // Hypixel autoblock state (0 or 1)
     public int blockingTime = 0;
-    
-    public final ConcurrentLinkedQueue<Packet<?>> blinkedPackets = new ConcurrentLinkedQueue<>();
 
     public KillAuraAutoBlock(KillAura parent) {
         this.parent = parent;
@@ -224,13 +220,7 @@ public class KillAuraAutoBlock {
         
         releasePackets();
         blocking = false;
-        
-        // Stop using Blink silently for non-Hypixel modes
-        if (parent.autoBlockMode.getInput() != 9 && blinking && ModuleManager.blink != null && !ModuleManager.blink.isEnabled()) {
-            ModuleManager.blink.stopUsingSilently(parent);
-            blinking = false;
-        }
-        
+
         if (Raven.badPacketsHandler.playerSlot != mc.thePlayer.inventory.currentItem && swapped) {
             mc.thePlayer.sendQueue.addToSendQueue(new C09PacketHeldItemChange(mc.thePlayer.inventory.currentItem));
             Raven.badPacketsHandler.playerSlot = mc.thePlayer.inventory.currentItem;
@@ -244,7 +234,6 @@ public class KillAuraAutoBlock {
 
     public void releasePackets() {
         try {
-            // For Hypixel autoblock, use Blink's packet queue if available
             if (parent.autoBlockMode.getInput() == 9 && ModuleManager.blink != null && ModuleManager.blink.getMode().getSelected() instanceof keystrokesmod.module.impl.player.blink.NormalBlink) {
                 keystrokesmod.module.impl.player.blink.NormalBlink normalBlink = (keystrokesmod.module.impl.player.blink.NormalBlink) ModuleManager.blink.getMode().getSelected();
                 synchronized (normalBlink.blinkedPackets) {
@@ -256,23 +245,11 @@ public class KillAuraAutoBlock {
                     }
                     normalBlink.blinkedPackets.clear();
                 }
-            } else {
-                // Fallback to local packet queue
-                synchronized (blinkedPackets) {
-                    for (Packet<?> packet : blinkedPackets) {
-                        if (packet instanceof C09PacketHeldItemChange) {
-                            Raven.badPacketsHandler.playerSlot = ((C09PacketHeldItemChange) packet).getSlotId();
-                        }
-                        PacketUtils.sendPacketNoEvent(packet);
-                    }
-                }
             }
         } catch (Exception e) {
             e.printStackTrace();
             Utils.sendModuleMessage(parent, "&cThere was an error releasing blinked packets");
         }
-        blinkedPackets.clear();
-        blinking = false;
     }
     
     public void handlePacketReceive(ReceivePacketEvent e) {

@@ -588,7 +588,7 @@ public class KillAura extends IAutoClicker {
 
     @SubscribeEvent
     public void onPreUpdate(PreUpdateEvent e) {
-        if (useAutoClickerSettings.isToggled() && ModuleManager.autoClicker != null && ModuleManager.autoClicker.isEnabled()) {
+        if (useAutoClickerSettings.isToggled() && ModuleManager.autoClicker != null && ModuleManager.autoClicker.isActive()) {
             keystrokesmod.module.setting.impl.SubMode<?> selectedMode = ModuleManager.autoClicker.mode.getSelected();
             if (selectedMode != null && selectedMode.isEnabled()) {
                 try {
@@ -795,28 +795,6 @@ public class KillAura extends IAutoClicker {
         }
     }
 
-    @SubscribeEvent(priority = EventPriority.HIGH)
-    public void onSendPacket(SendPacketEvent e) {
-        if (!Utils.nullCheck()) {
-            return;
-        }
-        
-        // For Hypixel autoblock, if Blink is being used silently, let Blink handle it
-        if (autoBlockMode.getInput() == 9 && ModuleManager.blink != null && ModuleManager.blink.isUsedSilently()) {
-            // Blink's handler will take care of packet interception
-            return;
-        }
-        
-        // Otherwise, use local packet handling
-        if (!autoBlock.blinking) {
-            return;
-        }
-        if (e.getPacket().getClass().getSimpleName().startsWith("S")) return;
-        
-        autoBlock.blinkedPackets.add(e.getPacket());
-        e.setCanceled(true);
-    }
-
     @SubscribeEvent
     public void onReceivePacket(ReceivePacketEvent e) {
         autoBlock.handlePacketReceive(e);
@@ -917,7 +895,7 @@ public class KillAura extends IAutoClicker {
 
     @Override
     public boolean click() {
-        if (useAutoClickerSettings.isToggled() && ModuleManager.autoClicker != null && ModuleManager.autoClicker.isEnabled()) {
+        if (useAutoClickerSettings.isToggled() && ModuleManager.autoClicker != null && ModuleManager.autoClicker.isActive()) {
             if (target != null && mc.thePlayer.getDistanceToEntity(target) <= swingRange.getInput()) {
                 if (mc.currentScreen == null && HitSelect.canAttack()) {
                     // Hypixel mode: cancel attack if blocking state doesn't allow

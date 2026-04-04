@@ -47,11 +47,8 @@ public class Blink extends Module {
 
     public static boolean isBlinking() {
         if (ModuleManager.blink == null) return false;
-        if (ModuleManager.blink.isEnabled()) return true;
-        if (ModuleManager.blink.isUsedSilently()) return true; // Check if being used silently
+        if (ModuleManager.blink.isActive()) return true;
         if (ModuleManager.blink.getMode().getSelected() instanceof FakeLagBlink) {
-            if (ModuleManager.blink.getMode().getSelected().isEnabled())
-                return true;
             return ((FakeLagBlink) ModuleManager.blink.getMode().getSelected()).needToDisable;
         }
         return false;
