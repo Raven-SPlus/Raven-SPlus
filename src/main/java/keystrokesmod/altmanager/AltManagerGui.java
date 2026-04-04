@@ -13,11 +13,13 @@ import keystrokesmod.altmanager.gui.MicrosoftLoginGui;
 import keystrokesmod.altmanager.microsoft.MicrosoftOAuthTranslation;
 import keystrokesmod.altmanager.util.AltJsonHandler;
 import keystrokesmod.module.ModuleManager;
+import keystrokesmod.module.impl.client.ClickGUI;
 import keystrokesmod.utility.font.FontManager;
 import keystrokesmod.utility.font.IFont;
 import keystrokesmod.utility.render.RRectUtils;
 import keystrokesmod.utility.render.RenderUtils;
 import keystrokesmod.utility.render.ColorUtils;
+import keystrokesmod.utility.render.blur.GlobalBlurManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiButton;
 import net.minecraft.client.gui.GuiMainMenu;
@@ -168,6 +170,45 @@ public class AltManagerGui extends GuiScreen {
 
         int visibleRows = getVisibleRows();
         String currentUsername = mc.getSession().getUsername();
+
+        boolean blurCustomButtons = ModuleManager.clientTheme.isEnabled()
+                && ModuleManager.clientTheme.button.isToggled()
+                && (ModuleManager.clientTheme.buttonBlur.isToggled() || ClickGUI.blurButtons.isToggled());
+        if (blurCustomButtons) {
+            int blurRadius = ClickGUI.blurButtons.isToggled()
+                    ? (int) ClickGUI.buttonBlurStrength.getInput()
+                    : (int) ModuleManager.clientTheme.blurStrength.getInput();
+
+            GlobalBlurManager.startBlur();
+            if (GlobalBlurManager.isBlurActive()) {
+                for (int i = startIndex; i < endIndex; i++) {
+                    int accountRow = i / COLUMNS;
+                    int column = i % COLUMNS;
+                    int relativeIndex = i - startIndex;
+                    int relativeRow = relativeIndex / COLUMNS;
+
+                    if (relativeRow >= visibleRows + 1) {
+                        break;
+                    }
+
+                    double smoothRow = accountRow - smoothScrollOffset;
+                    int accountX = startX + column * (ACCOUNT_BUTTON_WIDTH + COLUMN_SPACING);
+                    int yPos = (int) (SCROLL_AREA_TOP + smoothRow * (ACCOUNT_BUTTON_HEIGHT + ROW_SPACING));
+
+                    if (yPos + ACCOUNT_BUTTON_HEIGHT < SCROLL_AREA_TOP || yPos > getScrollAreaBottom()) {
+                        continue;
+                    }
+
+                    int deleteX = accountX + ACCOUNT_BUTTON_WIDTH - DELETE_BUTTON_WIDTH - 4;
+                    int deleteY = yPos + (ACCOUNT_BUTTON_HEIGHT - DELETE_BUTTON_HEIGHT) / 2;
+
+                    RRectUtils.drawRound(accountX, yPos, ACCOUNT_BUTTON_WIDTH, ACCOUNT_BUTTON_HEIGHT, 3.5F, new Color(255, 255, 255, 255));
+                    RRectUtils.drawRound(deleteX, deleteY, DELETE_BUTTON_WIDTH, DELETE_BUTTON_HEIGHT, 4.0F, new Color(255, 255, 255, 255));
+                }
+
+                GlobalBlurManager.endBlur(blurRadius, blurRadius / 4.0f);
+            }
+        }
 
         GL11.glPushMatrix();
         GL11.glEnable(GL11.GL_BLEND);

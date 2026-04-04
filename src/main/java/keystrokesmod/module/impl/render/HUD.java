@@ -37,6 +37,7 @@ public class HUD extends Module {
     private static final double ROW_HORIZONTAL_PADDING = 6.0;
     private static final double ROW_VERTICAL_PADDING = 2.0;
     private static final double ROW_GAP = 2.0;
+    private static final int INFO_SHADOW_SWAP_BASE_COLOR = new Color(170, 170, 170, 255).getRGB();
 
     public static ModeSetting theme;
     public static ModeSetting font;
@@ -151,15 +152,15 @@ public class HUD extends Module {
         }
         
         try {
-            List<String> texts = getDrawTexts();
+            List<HudEntry> entries = getDrawEntries();
 
-            if (texts.isEmpty()) {
+            if (entries.isEmpty()) {
                 return;
             }
 
             boolean shouldBlur = background.isToggled() && blurBackground.isToggled() && blurStrength != null && blurStrength.getInput() > 0;
             double bgOpacity = backgroundOpacity != null ? backgroundOpacity.getInput() : 100.0;
-            List<HudRow> rows = buildHudRows(texts);
+            List<HudRow> rows = buildHudRows(entries);
 
             if (shouldBlur) {
                 final int blurRadius = (int) blurStrength.getInput();
@@ -197,9 +198,9 @@ public class HUD extends Module {
         }
     }
 
-    private @NotNull List<HudRow> buildHudRows(@NotNull List<String> texts) {
+    private @NotNull List<HudRow> buildHudRows(@NotNull List<HudEntry> entries) {
         IFont fontRenderer = getFontRenderer();
-        List<HudRow> rows = new ArrayList<>(texts.size());
+        List<HudRow> rows = new ArrayList<>(entries.size());
         double currentY = hudY + ROW_TOP_SPACING;
         double horizontalOffset = textOffset != null ? textOffset.getInput() : 0.0;
         double verticalOffset = verticalTextOffset != null ? verticalTextOffset.getInput() : 0.0;
@@ -210,8 +211,9 @@ public class HUD extends Module {
         double fontHeight = fontRenderer.height();
         double backgroundHeight = Math.round(fontHeight + backgroundHeightPaddingValue);
 
-        for (String text : texts) {
-            double textWidth = fontRenderer.width(text);
+        for (HudEntry entry : entries) {
+            String fullText = entry.getFullText();
+            double textWidth = fontRenderer.width(fullText);
             double textX = alignRight.isToggled() ? hudX - textWidth + horizontalOffset : hudX - horizontalOffset;
             double backgroundX = textX - horizontalPadding;
             double backgroundWidth = textWidth + horizontalPadding * 2.0;
@@ -219,7 +221,7 @@ public class HUD extends Module {
             double textY = backgroundY + ((backgroundHeight - fontHeight) / 2.0) - verticalOffset;
             double sidebarX = alignRight.isToggled() ? backgroundX + backgroundWidth + 1.5 : backgroundX - 3.0;
 
-            rows.add(new HudRow(text, backgroundX, backgroundY, backgroundWidth, backgroundHeight, textX, textY, sidebarX, colorOffset));
+            rows.add(new HudRow(entry.primaryText, entry.secondaryText, backgroundX, backgroundY, backgroundWidth, backgroundHeight, textX, textY, sidebarX, colorOffset));
 
             colorOffset += theme.getInput() == 0 ? -120.0 : -12.0;
             currentY += backgroundHeight + rowGap;
@@ -278,7 +280,11 @@ public class HUD extends Module {
                 );
             }
 
-            fontRenderer.drawString(row.text, row.textX, row.textY, textColor, dropShadow.isToggled());
+            fontRenderer.drawString(row.primaryText, row.textX, row.textY, textColor, dropShadow.isToggled());
+            if (!row.secondaryText.isEmpty()) {
+                double infoX = row.textX + fontRenderer.width(row.primaryText + " ");
+                drawHudInfoText(fontRenderer, row.secondaryText, infoX, row.textY, dropShadow.isToggled());
+            }
         }
     }
 
@@ -303,8 +309,23 @@ public class HUD extends Module {
         return Math.max(0, Math.min(255, (int) Math.round(alpha)));
     }
 
+    private static void drawHudInfoText(@NotNull IFont fontRenderer, @NotNull String infoText, double x, double y, boolean shadow) {
+        int shadowColor = INFO_SHADOW_SWAP_BASE_COLOR;
+        int textColor = getShadowColor(shadowColor);
+
+        if (shadow) {
+            fontRenderer.drawString(infoText, x + 1, y + 1, shadowColor, false);
+        }
+        fontRenderer.drawString(infoText, x, y, textColor, false);
+    }
+
+    private static int getShadowColor(int color) {
+        return (color & 0xFCFCFC) >> 2 | color & 0xFF000000;
+    }
+
     private static final class HudRow {
-        private final String text;
+        private final String primaryText;
+        private final String secondaryText;
         private final double backgroundX;
         private final double backgroundY;
         private final double backgroundWidth;
@@ -314,8 +335,9 @@ public class HUD extends Module {
         private final double sidebarX;
         private final double colorOffset;
 
-        private HudRow(String text, double backgroundX, double backgroundY, double backgroundWidth, double backgroundHeight, double textX, double textY, double sidebarX, double colorOffset) {
-            this.text = text;
+        private HudRow(String primaryText, String secondaryText, double backgroundX, double backgroundY, double backgroundWidth, double backgroundHeight, double textX, double textY, double sidebarX, double colorOffset) {
+            this.primaryText = primaryText;
+            this.secondaryText = secondaryText;
             this.backgroundX = backgroundX;
             this.backgroundY = backgroundY;
             this.backgroundWidth = backgroundWidth;
@@ -328,23 +350,30 @@ public class HUD extends Module {
     }
 
     @NotNull
-    private List<String> getDrawTexts() {
+    private List<HudEntry> getDrawEntries() {
         List<Module> modules = ModuleManager.organizedModules;
-        List<String> texts = new ArrayList<>(modules.size());
+        List<HudEntry> entries = new ArrayList<>(modules.size());
 
         for (Module module : modules) {
             if (isIgnored(module)) continue;
-
-            String text = module.getPrettyName();
-            if (showInfo.isToggled() && !module.getPrettyInfo().isEmpty()) {
-                text += " §7" + module.getPrettyInfo();
-            }
-            if (lowercase.isToggled()) {
-                text = text.toLowerCase();
-            }
-            texts.add(text);
+            entries.add(getHudEntry(module));
         }
-        return texts;
+        return entries;
+    }
+
+    private static @NotNull HudEntry getHudEntry(@NotNull Module module) {
+        String primaryText = module.getPrettyName();
+        String secondaryText = "";
+
+        if (showInfo.isToggled() && !module.getPrettyInfo().isEmpty()) {
+            secondaryText = module.getPrettyInfo();
+        }
+        if (lowercase.isToggled()) {
+            primaryText = primaryText.toLowerCase();
+            secondaryText = secondaryText.toLowerCase();
+        }
+
+        return new HudEntry(primaryText, secondaryText);
     }
 
     public static double getLongestModule(IFont fr) {
@@ -352,13 +381,7 @@ public class HUD extends Module {
 
         for (Module module : ModuleManager.organizedModules) {
             if (module.isEnabled()) {
-                String moduleName = module.getPrettyName();
-                if (showInfo.isToggled() && !module.getInfo().isEmpty()) {
-                    moduleName += " §7" + module.getInfo();
-                }
-                if (lowercase.isToggled()) {
-                    moduleName = moduleName.toLowerCase();
-                }
+                String moduleName = getHudEntry(module).getFullText();
                 if (fr.width(moduleName) > length) {
                     length = fr.width(moduleName);
                 }
@@ -464,13 +487,8 @@ public class HUD extends Module {
                 for (Module module : ModuleManager.organizedModules) {
                     if (isIgnored(module)) continue;
 
-                    String moduleName = module.getPrettyName();
-                    if (showInfo.isToggled() && !module.getInfo().isEmpty()) {
-                        moduleName += " §7" + module.getInfo();
-                    }
-                    if (lowercase.isToggled()) {
-                        moduleName = moduleName.toLowerCase();
-                    }
+                    HudEntry entry = getHudEntry(module);
+                    String moduleName = entry.getFullText();
                     int e = Theme.getGradient((int) theme.getInput(), n2);
                     if (theme.getInput() == 0) {
                         n2 -= 120;
@@ -482,7 +500,11 @@ public class HUD extends Module {
                     if (alignRight.isToggled()) {
                         n3 -= getFontRenderer().width(moduleName);
                     }
-                    getFontRenderer().drawString(moduleName, n3, (float) n, e, dropShadow.isToggled());
+                    getFontRenderer().drawString(entry.primaryText, n3, (float) n, e, dropShadow.isToggled());
+                    if (!entry.secondaryText.isEmpty()) {
+                        double infoX = n3 + getFontRenderer().width(entry.primaryText + " ");
+                        drawHudInfoText(getFontRenderer(), entry.secondaryText, infoX, n, dropShadow.isToggled());
+                    }
                     n += Math.round(getFontRenderer().height() + 2);
                 }
                 return new double[]{this.miX + longestModule, n, this.miX - longestModule};
@@ -628,6 +650,20 @@ public class HUD extends Module {
                 return FontManager.regular22;
             case 3:
                 return FontManager.tenacity20;
+        }
+    }
+
+    private static final class HudEntry {
+        private final String primaryText;
+        private final String secondaryText;
+
+        private HudEntry(String primaryText, String secondaryText) {
+            this.primaryText = primaryText;
+            this.secondaryText = secondaryText;
+        }
+
+        private @NotNull String getFullText() {
+            return secondaryText.isEmpty() ? primaryText : primaryText + " " + secondaryText;
         }
     }
 }
