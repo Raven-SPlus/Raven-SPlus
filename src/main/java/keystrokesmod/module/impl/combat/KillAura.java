@@ -465,28 +465,11 @@ public class KillAura extends IAutoClicker {
         autoBlock.onDisable();
         
         // Fix rotation snap on disable:
-        // If Silent rotation was active, the client's real rotation might be different from the server-side rotation.
-        // However, the issue described is likely due to the sudden snap from a large modulo value (e.g. 36000) 
-        // back to a normal value (e.g. 45) in a single tick, which Grim detects as a massive rotation.
-        // We need to ensure the transition is handled or that we don't send a packet with a huge delta.
-        // Since we modify the yaw sent to the server, disabling the module stops that modification.
-        // The next packet sent by the client will use mc.thePlayer.rotationYaw (e.g. 45).
-        // If the last packet sent was 36045, the server sees a delta of -36000.
-        
-        // To fix this, we should ideally sync the client's rotation to the last sent server rotation (wrapped), 
-        // or ensure the last sent packet was normalized. But we can't easily undo the last packet.
-        // Instead, we can try to set the client's rotation to a value that minimizes the delta for the NEXT packet,
-        // but that would snap the user's view.
-        
-        // Better approach: The "AimModulo360" bypass adds 36000. When disabling, we are effectively removing this offset.
-        // This big jump is exactly what Grim detects. 
-        // WE CANNOT FIX THIS PERFECTLY without risking a view snap or a flag.
-        // BUT, if we are using Silent mode, the client view is already decoupled.
-        // 
-        // If we just let it disable, the next packet is normal.
-        // Maybe we can force a "reset" packet or similar?
-        // Actually, if we modify RotationHandler to NOT return the offset when KA is disabled, that handles it.
-        // The issue is that the LAST packet had the offset. The CURRENT/NEXT packet will not.
+        // If Silent rotation was active, the client's real rotation might differ from the
+        // server-facing yaw. We now keep modulo continuity by unwrapping around the previous
+        // sent yaw instead of jumping to an arbitrary huge offset, but disabling can still
+        // produce one final server/client delta because the next packet follows the real view.
+        // Resetting here keeps the next KillAura activation from inheriting any extended yaw.
         
         if (Utils.nullCheck()) mc.thePlayer.stopUsingItem();
     }
