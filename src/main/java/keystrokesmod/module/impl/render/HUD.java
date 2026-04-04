@@ -46,6 +46,9 @@ public class HUD extends Module {
     private final ButtonSetting sidebar;
     private final ButtonSetting blurBackground;
     public static SliderSetting blurStrength;
+    private static SliderSetting moduleSpacing;
+    private static SliderSetting backgroundWidthPadding;
+    private static SliderSetting backgroundHeightPadding;
     public static ButtonSetting alphabeticalSort;
     private static ButtonSetting alignRight;
     public static ButtonSetting lowercase;
@@ -88,6 +91,9 @@ public class HUD extends Module {
         this.registerSetting(blurBackground = new ButtonSetting("Blur background", false, background::isToggled));
         // Global blur strength used by HUD + any HUD overlays that request blur.
         this.registerSetting(blurStrength = new SliderSetting("Blur strength", 15.0, 1.0, 64.0, 1.0));
+        this.registerSetting(moduleSpacing = new SliderSetting("Module spacing", ROW_GAP, 0.0, 12.0, 0.5));
+        this.registerSetting(backgroundWidthPadding = new SliderSetting("Background width", ROW_HORIZONTAL_PADDING, 0.0, 20.0, 0.5, background::isToggled));
+        this.registerSetting(backgroundHeightPadding = new SliderSetting("Background height", ROW_VERTICAL_PADDING * 2.0, 0.0, 16.0, 0.5, background::isToggled));
         this.registerSetting(sidebar = new ButtonSetting("Sidebar", false));
         this.registerSetting(textOffset = new SliderSetting("Horizontal text offset", 0.0, -10.0, 10.0, 0.1));
         this.registerSetting(verticalTextOffset = new SliderSetting("Vertical text offset", 0.0, -10.0, 10.0, 0.1));
@@ -197,22 +203,26 @@ public class HUD extends Module {
         double currentY = hudY + ROW_TOP_SPACING;
         double horizontalOffset = textOffset != null ? textOffset.getInput() : 0.0;
         double verticalOffset = verticalTextOffset != null ? verticalTextOffset.getInput() : 0.0;
+        double horizontalPadding = backgroundWidthPadding != null ? backgroundWidthPadding.getInput() : ROW_HORIZONTAL_PADDING;
+        double backgroundHeightPaddingValue = backgroundHeightPadding != null ? backgroundHeightPadding.getInput() : ROW_VERTICAL_PADDING * 2.0;
+        double rowGap = moduleSpacing != null ? moduleSpacing.getInput() : ROW_GAP;
         double colorOffset = 0.0;
-        double backgroundHeight = Math.round(fontRenderer.height() + ROW_VERTICAL_PADDING * 2.0);
+        double fontHeight = fontRenderer.height();
+        double backgroundHeight = Math.round(fontHeight + backgroundHeightPaddingValue);
 
         for (String text : texts) {
             double textWidth = fontRenderer.width(text);
             double textX = alignRight.isToggled() ? hudX - textWidth + horizontalOffset : hudX - horizontalOffset;
-            double backgroundX = textX - ROW_HORIZONTAL_PADDING;
-            double backgroundWidth = textWidth + ROW_HORIZONTAL_PADDING * 2.0;
+            double backgroundX = textX - horizontalPadding;
+            double backgroundWidth = textWidth + horizontalPadding * 2.0;
             double backgroundY = currentY;
-            double textY = backgroundY + ROW_VERTICAL_PADDING - verticalOffset;
+            double textY = backgroundY + ((backgroundHeight - fontHeight) / 2.0) - verticalOffset;
             double sidebarX = alignRight.isToggled() ? backgroundX + backgroundWidth + 1.5 : backgroundX - 3.0;
 
             rows.add(new HudRow(text, backgroundX, backgroundY, backgroundWidth, backgroundHeight, textX, textY, sidebarX, colorOffset));
 
             colorOffset += theme.getInput() == 0 ? -120.0 : -12.0;
-            currentY += backgroundHeight + ROW_GAP;
+            currentY += backgroundHeight + rowGap;
         }
 
         return rows;
