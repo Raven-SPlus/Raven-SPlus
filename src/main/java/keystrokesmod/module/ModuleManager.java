@@ -128,6 +128,7 @@ public class ModuleManager {
     public static ViaVersionFix viaVersionFix;
     public static AutoGapple autoGapple;
     public static RemoteShop remoteShop;
+    public static MemoryFix memoryFix;
 
     public void register() {
 
@@ -139,6 +140,7 @@ public class ModuleManager {
         // this.addModule(new NyaProxy());
         this.addModule(new Settings());
         this.addModule(new MiddleClick());
+        this.addModule(memoryFix = new MemoryFix());
         this.addModule(notifications = new Notifications());
         this.addModule(new DiscordRpc());
         this.addModule(language = new Language());
@@ -319,6 +321,7 @@ public class ModuleManager {
         // Enable Sprint by default (can still be overridden by profiles/config)
         sprint.enable();
         commandChat.enable();
+        memoryFix.enable();
         notifications.enable();
         clientTheme.enable();
         modules.sort(Comparator.comparing(Module::getPrettyName));

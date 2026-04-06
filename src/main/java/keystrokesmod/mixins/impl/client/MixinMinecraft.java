@@ -5,6 +5,7 @@ import keystrokesmod.event.PreTickEvent;
 import keystrokesmod.event.RightClickEvent;
 import keystrokesmod.event.WorldChangeEvent;
 import keystrokesmod.module.ModuleManager;
+import keystrokesmod.module.impl.client.memoryfix.MemoryFixHelper;
 import keystrokesmod.module.impl.combat.HitBox;
 import keystrokesmod.module.impl.combat.Reach;
 import keystrokesmod.module.impl.exploit.ExploitFixer;
@@ -21,6 +22,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
@@ -93,6 +95,27 @@ public abstract class MixinMinecraft {
                 ci.cancel();
             }
         } catch (Throwable ignored) {
+        }
+    }
+
+    @Redirect(method = "freeMemory", at = @At(value = "INVOKE", target = "Ljava/lang/System;gc()V"), require = 0)
+    private void onExplicitGcInFreeMemory() {
+        maybeRunExplicitGc();
+    }
+
+    @Redirect(method = "loadWorld", at = @At(value = "INVOKE", target = "Ljava/lang/System;gc()V"), require = 0)
+    private void onExplicitGcInLoadWorld() {
+        maybeRunExplicitGc();
+    }
+
+    @Redirect(method = "launchIntegratedServer", at = @At(value = "INVOKE", target = "Ljava/lang/System;gc()V"), require = 0)
+    private void onExplicitGcInLaunchIntegratedServer() {
+        maybeRunExplicitGc();
+    }
+
+    private void maybeRunExplicitGc() {
+        if (!MemoryFixHelper.shouldDisableExplicitGc()) {
+            System.gc();
         }
     }
 
