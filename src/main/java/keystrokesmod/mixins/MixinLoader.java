@@ -1,5 +1,6 @@
 package keystrokesmod.mixins;
 
+import keystrokesmod.module.impl.client.memoryfix.MemoryFixCapeTransformer;
 import net.minecraftforge.fml.relauncher.IFMLLoadingPlugin;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -20,7 +21,9 @@ public class MixinLoader implements IFMLLoadingPlugin {
     @NotNull
     @Override
     public String[] getASMTransformerClass() {
-        return new String[0];
+        return new String[] {
+                MemoryFixCapeTransformer.class.getName()
+        };
     }
 
     @Nullable

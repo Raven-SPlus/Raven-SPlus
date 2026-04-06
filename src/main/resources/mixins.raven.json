@@ -16,6 +16,7 @@
     "network.C07PacketPlayerDiggingAccessor",
     "network.C08PacketPlayerBlockPlacementAccessor",
     "network.C0FPacketConfirmTransactionAccessor",
+    "network.MixinC08PacketPlayerBlockPlacement",
     "network.MixinModList",
     "network.MixinNetworkManager",
     "network.S08PacketPlayerPosLookAccessor",
@@ -29,10 +30,12 @@
     "world.BlockNoteAccessor",
     "world.MixinBlock",
     "world.MixinBlockLadder",
+    "world.MixinBlockLilyPad",
     "world.MixinBlockWeb",
     "world.ScoreAccessor"
   ],
   "client": [
+    "client.MixinAbstractResourcePack",
     "client.GuiConnectingAccessor",
     "client.GuiScreenAccessor",
     "client.KeyBindingAccessor",
