@@ -15,6 +15,7 @@ import keystrokesmod.utility.clicks.CPSCalculator;
 import keystrokesmod.utility.i18n.I18nManager;
 import keystrokesmod.utility.profile.Profile;
 import keystrokesmod.utility.profile.ProfileManager;
+import keystrokesmod.render.bridge.RenderBridge;
 import keystrokesmod.utility.render.blur.HudBlurBatcher;
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.client.ClientCommandHandler;
@@ -65,6 +66,7 @@ public class Raven {
 
     @EventHandler
     public void init(FMLInitializationEvent ignored) {
+        RenderBridge.getInstance().init();
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             // Ensure executor is stopped
             ex.shutdown();

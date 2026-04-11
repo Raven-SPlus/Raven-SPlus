@@ -9,6 +9,7 @@ import keystrokesmod.utility.render.BackgroundUtils;
 import keystrokesmod.utility.render.blur.BlurStencilProvider;
 import keystrokesmod.utility.render.blur.GlobalBlurManager;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiButton;
 import net.minecraft.client.gui.GuiScreen;
 import org.jetbrains.annotations.NotNull;
@@ -68,27 +69,42 @@ public abstract class MixinGuiScreen {
     )
     private void ravenAPlus$batchBlurAndDrawButton(GuiButton button, Minecraft minecraft, int mouseX, int mouseY) {
         if (!ravenAPlus$batchedButtonBlurDone) {
-            // Only run this for the custom themed buttons; otherwise preserve vanilla behavior entirely.
-            if (ModuleManager.clientTheme.isEnabled() && ModuleManager.clientTheme.button.isToggled()) {
-                boolean shouldBlur = ModuleManager.clientTheme.buttonBlur.isToggled() || ClickGUI.blurButtons.isToggled();
-                if (shouldBlur) {
-                    if (this.buttonList != null && !this.buttonList.isEmpty()) {
-                        int blurRadius = ClickGUI.blurButtons.isToggled()
-                                ? (int) ClickGUI.buttonBlurStrength.getInput()
-                                : (int) ModuleManager.clientTheme.blurStrength.getInput();
-                        float compression = blurRadius / 4.0f;
+            boolean clientThemeReady = ModuleManager.clientTheme != null;
+            boolean clickGuiReady = ClickGUI.blurButtons != null && ClickGUI.buttonBlurStrength != null;
+            boolean themedButtonsEnabled = clientThemeReady
+                    && ModuleManager.clientTheme.isEnabled()
+                    && ModuleManager.clientTheme.button.isToggled();
+            boolean shouldBlur = clickGuiReady && ClickGUI.blurButtons.isToggled();
+            if (!shouldBlur && themedButtonsEnabled && ModuleManager.clientTheme.buttonBlur != null) {
+                shouldBlur = ModuleManager.clientTheme.buttonBlur.isToggled();
+            }
 
-                        // Pre-pass: write all button shapes to stencil (no color writes).
-                        GlobalBlurManager.startBlur();
-                        if (GlobalBlurManager.isBlurActive()) {
-                            for (GuiButton b : this.buttonList) {
-                                if (b instanceof BlurStencilProvider) {
-                                    ((BlurStencilProvider) b).ravenAPlus$writeButtonBlurStencil(mouseX, mouseY, true);
-                                }
-                            }
-                            GlobalBlurManager.endBlur(blurRadius, compression);
+            if (shouldBlur && this.buttonList != null && !this.buttonList.isEmpty()) {
+                int blurRadius;
+                if (clickGuiReady && ClickGUI.blurButtons.isToggled()) {
+                    blurRadius = (int) ClickGUI.buttonBlurStrength.getInput();
+                } else if (clientThemeReady && ModuleManager.clientTheme.blurStrength != null) {
+                    blurRadius = (int) ModuleManager.clientTheme.blurStrength.getInput();
+                } else {
+                    blurRadius = 12;
+                }
+                float compression = blurRadius / 4.0f;
+
+                // Pre-pass: write all button shapes to stencil (no color writes).
+                GlobalBlurManager.startBlur();
+                if (GlobalBlurManager.isBlurActive()) {
+                    for (GuiButton b : this.buttonList) {
+                        if (b == null || !b.visible) {
+                            continue;
+                        }
+
+                        if (b instanceof BlurStencilProvider) {
+                            ((BlurStencilProvider) b).ravenAPlus$writeButtonBlurStencil(mouseX, mouseY, true);
+                        } else {
+                            Gui.drawRect(b.xPosition, b.yPosition, b.xPosition + b.width, b.yPosition + b.height, -1);
                         }
                     }
+                    GlobalBlurManager.endBlur(blurRadius, compression);
                 }
             }
             ravenAPlus$batchedButtonBlurDone = true;

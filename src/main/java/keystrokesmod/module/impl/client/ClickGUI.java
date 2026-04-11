@@ -6,6 +6,7 @@ import keystrokesmod.module.Module;
 import keystrokesmod.module.setting.impl.ButtonSetting;
 import keystrokesmod.module.setting.impl.SliderSetting;
 import keystrokesmod.module.setting.impl.ModeSetting;
+import keystrokesmod.render.bridge.RenderBridge;
 import keystrokesmod.utility.Utils;
 
 public class ClickGUI extends Module {
@@ -43,8 +44,7 @@ public class ClickGUI extends Module {
 
     public void onEnable() {
         if (Utils.nullCheck() && mc.currentScreen != Raven.clickGui) {
-            mc.displayGuiScreen(Raven.clickGui);
-            Raven.clickGui.initMain();
+            RenderBridge.getInstance().openClickGui(mc);
         }
         this.disable();
     }

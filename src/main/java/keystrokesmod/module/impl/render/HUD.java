@@ -9,6 +9,7 @@ import keystrokesmod.module.setting.impl.ModeSetting;
 import keystrokesmod.module.setting.impl.SliderSetting;
 import keystrokesmod.module.setting.impl.SubMode;
 import keystrokesmod.module.setting.utils.ModeOnly;
+import keystrokesmod.render.bridge.RenderBridge;
 import keystrokesmod.utility.font.FontManager;
 import keystrokesmod.utility.font.IFont;
 import keystrokesmod.utility.render.ColorUtils;
@@ -80,9 +81,7 @@ public class HUD extends Module {
         this.registerSetting(theme = new ModeSetting("Theme", Theme.themes, 0));
         this.registerSetting(font = new ModeSetting("Font", new String[]{"Minecraft", "Product Sans", "Regular", "Tenacity"}, 0));
         this.registerSetting(new ButtonSetting("Edit position", () -> {
-            final EditScreen screen = new EditScreen();
-            FMLCommonHandler.instance().bus().register(screen);
-            mc.displayGuiScreen(screen);
+            RenderBridge.getInstance().openHudEditor(mc);
         }));
         this.registerSetting(alignRight = new ButtonSetting("Align right", true));
         this.registerSetting(alphabeticalSort = new ButtonSetting("Alphabetical sort", false));
@@ -651,6 +650,12 @@ public class HUD extends Module {
             case 3:
                 return FontManager.tenacity20;
         }
+    }
+
+    public static void openLegacyHudEditor() {
+        final EditScreen screen = new EditScreen();
+        FMLCommonHandler.instance().bus().register(screen);
+        mc.displayGuiScreen(screen);
     }
 
     private static final class HudEntry {

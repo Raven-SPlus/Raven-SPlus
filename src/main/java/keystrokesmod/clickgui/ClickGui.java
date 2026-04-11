@@ -116,15 +116,22 @@ public class ClickGui extends GuiScreen {
 
         boolean themedBackground = ModuleManager.clientTheme.isEnabled() && ModuleManager.clientTheme.clickGui.isToggled();
 
-        // Render background overlay (before blur)
+        // Blur scene first, then apply overlays/tints on top to avoid muddy color sampling.
+        if (ClickGUI.blurBackground.isToggled()) {
+            GaussianBlur.startBlur();
+            drawRect(0, 0, this.width, this.height, -1);
+            int blurRadius = (int) ClickGUI.blurStrength.getInput();
+            float compression = blurRadius / 4.0f;
+            GaussianBlur.endBlur(blurRadius, compression);
+        }
+
         int overlayMode = (int) ClickGUI.backgroundOverlay.getInput();
         if (overlayMode == 1) {
-            // Black background with darkness (raw RGB)
+            // "Darkness" acts as opacity of black tint.
             int darkness = (int) ClickGUI.backgroundDarkness.getInput();
-            int color = (0xFF << 24) | (darkness << 16) | (darkness << 8) | darkness; // RGB all set to darkness value
+            int color = (darkness << 24);
             drawRect(0, 0, this.width, this.height, color);
         } else if (overlayMode == 2) {
-            // Shader background with opacity (raw alpha)
             int alpha = (int) ClickGUI.shaderOpacity.getInput();
             float opacity = alpha / 255.0f;
             try {
@@ -132,15 +139,6 @@ public class ClickGui extends GuiScreen {
             } catch (Exception e) {
                 e.printStackTrace();
             }
-        }
-
-        // Optional blur of the whole ClickGUI, controlled from the ClickGUI module (not ClientTheme)
-        if (ClickGUI.blurBackground.isToggled()) {
-            GaussianBlur.startBlur();
-            drawRect(0, 0, this.width, this.height, -1);
-            int blurRadius = (int) ClickGUI.blurStrength.getInput();
-            float compression = blurRadius / 4.0f;
-            GaussianBlur.endBlur(blurRadius, compression);
         }
 
         if (themedBackground) {

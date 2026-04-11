@@ -51,6 +51,7 @@
     "gui.MixinGuiConnecting",
     "gui.MixinGuiContainer",
     "gui.MixinGuiDownloadTerrain",
+    "gui.MixinGuiIngame",
     "gui.MixinGuiMainMenu",
     "gui.MixinGuiScreen",
     "network.MixinClientSpoofer",

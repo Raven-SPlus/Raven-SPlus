@@ -3,6 +3,7 @@ package keystrokesmod.utility.render.blur;
 import keystrokesmod.utility.Utils;
 import keystrokesmod.module.ModuleManager;
 import keystrokesmod.module.impl.render.HUD;
+import keystrokesmod.render.bridge.RenderBridge;
 import net.minecraftforge.fml.common.eventhandler.EventPriority;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.TickEvent;
@@ -100,14 +101,28 @@ public final class HudBlurBatcher {
         resetFrame();
     }
 
+    public static void beginOverlayFrame() {
+        resetFrame();
+    }
+
+    public static void endOverlayFrame() {
+        flushFrame();
+    }
+
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public void ravenAPlus$renderTickBegin(TickEvent.RenderTickEvent e) {
+        if (RenderBridge.isGuiIngameDispatchEnabled()) {
+            return;
+        }
         if (e.phase != TickEvent.Phase.END) return;
         resetFrame();
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public void ravenAPlus$renderTickEnd(TickEvent.RenderTickEvent e) {
+        if (RenderBridge.isGuiIngameDispatchEnabled()) {
+            return;
+        }
         if (e.phase != TickEvent.Phase.END) return;
         flushFrame();
     }
