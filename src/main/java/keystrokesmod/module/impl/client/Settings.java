@@ -8,6 +8,7 @@ import keystrokesmod.module.setting.impl.SliderSetting;
 import keystrokesmod.render.RenderFeatureFlags;
 import keystrokesmod.render.RenderMode;
 import keystrokesmod.render.glide.color.GlideColorManager;
+import keystrokesmod.render.glide.color.GlideTheme;
 import org.jetbrains.annotations.NotNull;
 
 public class Settings extends Module {
@@ -50,7 +51,12 @@ public class Settings extends Module {
         this.registerSetting(new DescriptionSetting("Profiles"));
         this.registerSetting(sendMessage = new ButtonSetting("Send message on enable", true));
         this.registerSetting(new DescriptionSetting("Theme colors"));
-        this.registerSetting(glideTheme = new ModeSetting("Glide theme", new String[]{"Light", "Dark"}, 0));
+        GlideTheme[] glideThemes = GlideTheme.values();
+        String[] glideThemeNames = new String[glideThemes.length];
+        for (int i = 0; i < glideThemes.length; i++) {
+            glideThemeNames[i] = glideThemes[i].getName();
+        }
+        this.registerSetting(glideTheme = new ModeSetting("Glide theme", glideThemeNames, 0));
         this.registerSetting(glideAccent = new ModeSetting("Glide accent", GlideColorManager.COLOR_NAMES, 0));
         this.registerSetting(offset = new SliderSetting("Offset", 0.5, -3.0, 3.0, 0.1));
         this.registerSetting(timeMultiplier = new SliderSetting("Time multiplier", 0.5, 0.1, 4.0, 0.1));
