@@ -59,7 +59,7 @@ public class GradientBlur {
         }
         int leftTop = pixels[0];
         int rightTop = pixels[width - 1];
-        int leftBottom = pixels[(height - 1) * width - 1];
+        int leftBottom = pixels[(height - 1) * width];
         int rightBottom = pixels[height * width - 1];
         Color color1, color2;
         switch (type) {
@@ -81,11 +81,11 @@ public class GradientBlur {
         targetB2 = color2.getBlue();
         if (!inited) {
             r1 = targetR1;
-            g1 = targetB1;
-            b1 = targetG1;
+            g1 = targetG1;
+            b1 = targetB1;
             r2 = targetR2;
-            g2 = targetB2;
-            b2 = targetG2;
+            g2 = targetG2;
+            b2 = targetB2;
             inited = true;
         }
         lastR1 = r1;

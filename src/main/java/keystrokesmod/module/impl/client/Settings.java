@@ -5,6 +5,9 @@ import keystrokesmod.module.setting.impl.ButtonSetting;
 import keystrokesmod.module.setting.impl.DescriptionSetting;
 import keystrokesmod.module.setting.impl.ModeSetting;
 import keystrokesmod.module.setting.impl.SliderSetting;
+import keystrokesmod.render.RenderFeatureFlags;
+import keystrokesmod.render.RenderMode;
+import keystrokesmod.render.glide.color.GlideColorManager;
 import org.jetbrains.annotations.NotNull;
 
 public class Settings extends Module {
@@ -18,8 +21,11 @@ public class Settings extends Module {
     public static SliderSetting offset;
     public static SliderSetting timeMultiplier;
     public static ModeSetting toggleSound;
+    public static ModeSetting glideTheme;
+    public static ModeSetting glideAccent;
     public static ButtonSetting sendMessage;
     public static ModeSetting backgroundMode;
+    public static ModeSetting renderMode;
     
     // Target filter settings
     public static ButtonSetting targetPlayers;
@@ -44,11 +50,15 @@ public class Settings extends Module {
         this.registerSetting(new DescriptionSetting("Profiles"));
         this.registerSetting(sendMessage = new ButtonSetting("Send message on enable", true));
         this.registerSetting(new DescriptionSetting("Theme colors"));
+        this.registerSetting(glideTheme = new ModeSetting("Glide theme", new String[]{"Light", "Dark"}, 0));
+        this.registerSetting(glideAccent = new ModeSetting("Glide accent", GlideColorManager.COLOR_NAMES, 0));
         this.registerSetting(offset = new SliderSetting("Offset", 0.5, -3.0, 3.0, 0.1));
         this.registerSetting(timeMultiplier = new SliderSetting("Time multiplier", 0.5, 0.1, 4.0, 0.1));
         this.registerSetting(toggleSound = new ModeSetting("Toggle sound", new String[]{"None", "Rise", "Sigma", "QuickMacro"}, 1));
         this.registerSetting(new DescriptionSetting("Client background"));
         this.registerSetting(backgroundMode = new ModeSetting("Custom client background", new String[]{"Flow", "Rise", "Nexus", "Aurora"}, 3));
+        this.registerSetting(new DescriptionSetting("Renderer"));
+        this.registerSetting(renderMode = new ModeSetting("GUI render mode", new String[]{"Legacy", "Glide"}, RenderFeatureFlags.getRenderMode() == RenderMode.GLIDE ? 1 : 0));
         
         // Target filter settings
         this.registerSetting(new DescriptionSetting("Target Filter"));
@@ -61,6 +71,17 @@ public class Settings extends Module {
         this.registerSetting(targetOthers = new ButtonSetting("Target others", false));
         
         this.canBeEnabled = false;
+    }
+
+    @Override
+    public void guiButtonToggled(ButtonSetting b) {
+    }
+
+    @Override
+    public void onUpdate() {
+        if (renderMode != null) {
+            RenderFeatureFlags.setRenderMode(renderMode.getInput() == 1 ? RenderMode.GLIDE : RenderMode.LEGACY);
+        }
     }
 
     public static @NotNull String getToggleSound(boolean enable) {
@@ -83,5 +104,9 @@ public class Settings extends Module {
                 break;
         }
         return startSuffix + middleSuffix + endSuffix;
+    }
+
+    public static RenderMode getConfiguredRenderMode() {
+        return renderMode != null && renderMode.getInput() == 1 ? RenderMode.GLIDE : RenderMode.LEGACY;
     }
 }

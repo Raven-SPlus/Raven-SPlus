@@ -35,6 +35,16 @@ compileJava {
     options.encoding = 'UTF-8'
 }
 
+ext.coremodManifestAttributes = [
+        'MixinConfigs': 'mixins.raven.json',
+        'TweakClass': 'org.spongepowered.asm.launch.MixinTweaker',
+        'TweakOrder': 0,
+        'FMLCorePlugin': 'keystrokesmod.mixins.MixinLoader',
+        'ForceLoadAsMod': true,
+        'FMLCorePluginContainsFMLMod': true,
+        'ModSide': 'CLIENT'
+]
+
 minecraft {
     version = "1.8.9-11.15.1.2318-1.8.9"
     runDir = "run"
@@ -82,6 +92,8 @@ dependencies {
     implementation 'cn.hutool:hutool-all:5.8.26'
     implementation files('libraries/json-20220924.jar')
     implementation files('libraries/discord-rpc.jar')
+    implementation files('libraries/lwjgl-soar.jar')
+    implementation files('libraries/lwjgl-soar-natives.jar')
 //    implementation files('libraries/ViaAprilFools-3.0.2-SNAPSHOT.jar')
 //    implementation files('libraries/ViaBackwards-5.0.4-SNAPSHOT.jar')
 //    implementation files('libraries/ViaLegacy-3.0.3-SNAPSHOT.jar')
@@ -91,6 +103,8 @@ dependencies {
 
     embed files('libraries/discord-rpc.jar')
     embed files('libraries/json-20220924.jar')
+    embed files('libraries/lwjgl-soar.jar')
+    embed files('libraries/lwjgl-soar-natives.jar')
 //    embed files('libraries/viaforge-1.8.9-3.3.3.jar')
 //    embed files('libraries/ViaAprilFools-3.0.2-SNAPSHOT.jar')
 //    embed files('libraries/ViaBackwards-5.0.4-SNAPSHOT.jar')
@@ -116,25 +130,26 @@ processResources {
 }
 
 jar {
-    from(configurations.embed.collect {
-        it.isDirectory() ? it : zipTree(it)
-    }) {
-        exclude 'dummyThing',
-                'LICENSE.txt',
-                'META-INF/MUMFREY.RSA',
-                'META-INF/maven/**',
-                'org/**/*.html'
-    }
     manifest {
-        attributes(
-                'MixinConfigs': 'mixins.raven.json',
-                'TweakClass': 'org.spongepowered.asm.launch.MixinTweaker',
-                'TweakOrder': 0,
-                "FMLCorePlugin": "keystrokesmod.mixins.MixinLoader",
-                "ForceLoadAsMod": true,
-                'FMLCorePluginContainsFMLMod': true,
-                "ModSide": "CLIENT"
-        )
+        attributes(coremodManifestAttributes)
+    }
+}
+
+shadowJar {
+    configurations = [project.configurations.embed]
+    classifier = 'all'
+
+    exclude 'dummyThing',
+            'LICENSE.txt',
+            'META-INF/MUMFREY.RSA',
+            'META-INF/*.SF',
+            'META-INF/*.DSA',
+            'META-INF/*.RSA',
+            'META-INF/maven/**',
+            'org/**/*.html'
+
+    manifest {
+        attributes(coremodManifestAttributes)
     }
 }
 
@@ -142,4 +157,10 @@ reobf {
     jar {
         mappingType = "SEARGE"
     }
+    shadowJar {
+        mappingType = "SEARGE"
+    }
 }
+
+reobfShadowJar.dependsOn shadowJar
+build.dependsOn reobfShadowJar

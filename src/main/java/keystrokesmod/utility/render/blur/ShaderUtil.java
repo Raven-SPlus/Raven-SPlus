@@ -425,7 +425,7 @@ public class ShaderUtil {
             "    sum += texture2D(inTexture, uv + halfpixel.xy * offset);\n" +
             "    sum += texture2D(inTexture, uv + vec2(halfpixel.x, -halfpixel.y) * offset);\n" +
             "    sum += texture2D(inTexture, uv - vec2(halfpixel.x, -halfpixel.y) * offset);\n" +
-            "    gl_FragColor = vec4(sum.rgb * .125, 1.0);\n" +
+            "    gl_FragColor = sum * 0.125;\n" +
             "}\n";
 
     private final String gradientMask = "#version 120\n" +

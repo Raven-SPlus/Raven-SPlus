@@ -30,6 +30,7 @@ public class GaussianBlur {
         if (radius <= 0 || compression <= 0) {
             StencilUtil.uninitStencilBuffer();
             ColorUtils.resetColor();
+            GlStateManager.disableBlend();
             GlStateManager.bindTexture(0);
             mc.mcProfiler.endSection();
             return;
@@ -41,7 +42,10 @@ public class GaussianBlur {
         KawaseBlur.renderBlur(mc.getFramebuffer().framebufferTexture, iterations, offset);
 
         StencilUtil.uninitStencilBuffer();
+        GlStateManager.disableBlend();
         ColorUtils.resetColor();
+        GlStateManager.enableAlpha();
+        GlStateManager.enableTexture2D();
         GlStateManager.bindTexture(0);
 
         mc.mcProfiler.endSection();

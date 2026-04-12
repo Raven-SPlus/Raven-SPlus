@@ -16,6 +16,14 @@ public final class RenderFeatureFlags {
         return renderMode;
     }
 
+    public static void setRenderMode(RenderMode mode) {
+        if (mode == null) {
+            mode = DEFAULT_RENDER_MODE;
+        }
+        renderMode = mode;
+        System.setProperty(RENDER_MODE_PROPERTY, mode.name());
+    }
+
     public static boolean isGlideRendererEnabled() {
         return renderMode == RenderMode.GLIDE;
     }

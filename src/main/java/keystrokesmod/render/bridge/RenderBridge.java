@@ -1,6 +1,7 @@
 package keystrokesmod.render.bridge;
 
 import keystrokesmod.Raven;
+import keystrokesmod.module.impl.client.Settings;
 import keystrokesmod.module.impl.render.HUD;
 import keystrokesmod.render.RenderFeatureFlags;
 import keystrokesmod.render.RenderMode;
@@ -43,6 +44,7 @@ public final class RenderBridge {
         if (mc == null) {
             return;
         }
+        RenderFeatureFlags.setRenderMode(Settings.getConfiguredRenderMode());
         boolean opened = RenderFeatureFlags.isGlideRendererEnabled() && glideRenderCore.openClickGui(mc);
         if (!opened && Raven.clickGui != null) {
             mc.displayGuiScreen(Raven.clickGui);
@@ -54,6 +56,7 @@ public final class RenderBridge {
         if (mc == null) {
             return;
         }
+        RenderFeatureFlags.setRenderMode(Settings.getConfiguredRenderMode());
         boolean opened = RenderFeatureFlags.isGlideRendererEnabled() && glideRenderCore.openHudEditor(mc);
         if (!opened) {
             HUD.openLegacyHudEditor();

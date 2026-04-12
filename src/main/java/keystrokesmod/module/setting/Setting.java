@@ -35,6 +35,10 @@ public abstract class Setting {
         this.parent = parent;
     }
 
+    public @Nullable Module getParent() {
+        return this.parent;
+    }
+
     public String getName() {
         return this.n;
     }

@@ -97,7 +97,10 @@ public class GlobalBlurManager {
         KawaseBlur.renderBlur(mc.getFramebuffer().framebufferTexture, iterations, offset);
 
         StencilUtil.uninitStencilBuffer();
+        GlStateManager.disableBlend();
         ColorUtils.resetColor();
+        GlStateManager.enableAlpha();
+        GlStateManager.enableTexture2D();
         GlStateManager.bindTexture(0);
 
         blurActive = false;

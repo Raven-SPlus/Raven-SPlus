@@ -142,7 +142,6 @@ public class ClickGui extends GuiScreen {
         }
 
         if (themedBackground) {
-            // Render gradient background on top of (optionally) blurred background
             blur.update(0, 0, width, height);
             blur.render(0, 0, width, height, 1, 0.1f);
         } else {

@@ -72,6 +72,10 @@ public class HUD extends Module {
     private static ButtonSetting experimental;
     public static int hudX = -1; // Will be set to upper right in constructor
     public static int hudY = 5;
+    public static int current$minX;
+    public static int current$maxX;
+    public static int current$minY;
+    public static int current$maxY;
     private boolean isAlphabeticalSort;
     private boolean canShowInfo;
 
@@ -229,6 +233,38 @@ public class HUD extends Module {
         return rows;
     }
 
+    private void updateEditorBounds(@NotNull List<HudRow> rows) {
+        if (rows.isEmpty()) {
+            current$minX = hudX;
+            current$maxX = hudX;
+            current$minY = hudY;
+            current$maxY = hudY;
+            return;
+        }
+
+        double minX = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE;
+        double minY = Double.MAX_VALUE;
+        double maxY = -Double.MAX_VALUE;
+
+        for (HudRow row : rows) {
+            minX = Math.min(minX, row.backgroundX);
+            maxX = Math.max(maxX, row.backgroundX + row.backgroundWidth);
+            minY = Math.min(minY, row.backgroundY);
+            maxY = Math.max(maxY, row.backgroundY + row.backgroundHeight);
+
+            if (sidebar.isToggled()) {
+                minX = Math.min(minX, row.sidebarX);
+                maxX = Math.max(maxX, row.sidebarX + 2.0);
+            }
+        }
+
+        current$minX = (int) Math.floor(minX);
+        current$maxX = (int) Math.ceil(maxX);
+        current$minY = (int) Math.floor(minY);
+        current$maxY = (int) Math.ceil(maxY);
+    }
+
     private void drawHudRows(@NotNull List<HudRow> rows, double bgOpacity, boolean drawShadow) {
         for (HudRow row : rows) {
             if (drawShadow) {
@@ -358,6 +394,80 @@ public class HUD extends Module {
             entries.add(getHudEntry(module));
         }
         return entries;
+    }
+
+    private @NotNull List<HudEntry> getEditorPreviewEntries() {
+        List<HudEntry> entries = getDrawEntries();
+        if (!entries.isEmpty()) {
+            return entries;
+        }
+
+        List<HudEntry> preview = new ArrayList<>(3);
+        preview.add(new HudEntry("This is an", ""));
+        preview.add(new HudEntry("Example", ""));
+        preview.add(new HudEntry("HUD", ""));
+        return preview;
+    }
+
+    private void renderEditorPreviewInternal() {
+        if (hudX == -1 && mc != null) {
+            ScaledResolution res = new ScaledResolution(mc);
+            hudX = res.getScaledWidth() - 5;
+        }
+
+        List<HudEntry> entries = getEditorPreviewEntries();
+        drawOriginalArrayListPreview(entries);
+    }
+
+    private void drawOriginalArrayListPreview(@NotNull List<HudEntry> entries) {
+        IFont fontRenderer = getFontRenderer();
+        double maxWidth = 0.0;
+
+        for (HudEntry entry : entries) {
+            maxWidth = Math.max(maxWidth, fontRenderer.width(entry.getFullText()));
+        }
+
+        current$minX = alignRight.isToggled() ? (int) Math.floor(hudX - maxWidth) : hudX;
+        current$maxX = alignRight.isToggled() ? hudX : (int) Math.ceil(hudX + maxWidth + 4);
+        current$minY = hudY;
+
+        int colorIndex = 0;
+        double currentY = hudY;
+        for (HudEntry entry : entries) {
+            String fullText = entry.getFullText();
+            double textWidth = fontRenderer.width(fullText);
+            double localOffset = alignRight.isToggled() ? (maxWidth - textWidth) : 0.0;
+
+            if (background.isToggled()) {
+                RenderUtils.drawRect(
+                        (float) (current$minX + localOffset),
+                        (float) currentY,
+                        (float) (current$minX + localOffset + textWidth + 5),
+                        (float) (currentY + 12),
+                        new Color(0, 0, 0, 100).getRGB()
+                );
+            }
+
+            double textX = current$minX + 3 + localOffset;
+            fontRenderer.drawString(entry.primaryText, textX, currentY + 2.5F,
+                    Theme.getGradient((int) theme.getInput(), colorIndex), dropShadow.isToggled());
+
+            if (!entry.secondaryText.isEmpty()) {
+                double infoX = textX + fontRenderer.width(entry.primaryText + " ");
+                drawHudInfoText(fontRenderer, entry.secondaryText, infoX, currentY + 2.5F, dropShadow.isToggled());
+            }
+
+            currentY += 12;
+            colorIndex -= 10;
+        }
+
+        current$maxY = (int) Math.ceil(currentY);
+    }
+
+    public static void renderEditorPreview() {
+        if (ModuleManager.hud != null) {
+            ModuleManager.hud.renderEditorPreviewInternal();
+        }
     }
 
     private static @NotNull HudEntry getHudEntry(@NotNull Module module) {
