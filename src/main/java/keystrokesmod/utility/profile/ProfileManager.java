@@ -5,7 +5,6 @@ import keystrokesmod.Raven;
 import keystrokesmod.clickgui.ClickGui;
 import keystrokesmod.clickgui.components.impl.CategoryComponent;
 import keystrokesmod.module.Module;
-import keystrokesmod.module.ModuleManager;
 import keystrokesmod.module.impl.client.ClickGUI;
 import keystrokesmod.module.impl.other.KillMessage;
 import keystrokesmod.module.impl.render.HUD;
@@ -218,9 +217,6 @@ public class ProfileManager {
 
                     Raven.currentProfile = getProfile(name);
                 }
-
-                // Single sort after all modules are loaded (deferred during bulk load)
-                ModuleManager.sort();
 
                 if (!Objects.equals(name, "latest")) {
                     deleteProfile("latest");

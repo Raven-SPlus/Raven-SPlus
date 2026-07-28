@@ -206,7 +206,7 @@ public class Module {
         this.setEnabled(true);
         ModuleManager.organizedModules.add(this);
         if (ModuleManager.hud != null && ModuleManager.hud.isEnabled()) {
-            ModuleManager.markDirty();
+            ModuleManager.sort();
         }
         updateRuntimeState(wasActive);
     }
@@ -320,12 +320,12 @@ public class Module {
         this.prettyName = name;
         this.cachedPrettyName = null;
         this.cachedPrettyNameSource = null;
-        ModuleManager.markDirty();
+        ModuleManager.sort();
     }
 
     public final void setPrettyInfo(String name) {
         this.prettyInfo = name;
-        ModuleManager.markDirty();
+        ModuleManager.sort();
     }
 
     public void registerSetting(Setting setting) {

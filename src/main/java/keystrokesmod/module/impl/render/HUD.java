@@ -137,8 +137,6 @@ public class HUD extends Module {
         if (ev.phase != TickEvent.Phase.END || !Utils.nullCheck()) {
             return;
         }
-        // Apply any deferred sort before rendering.
-        ModuleManager.ensureSorted();
         if (isAlphabeticalSort != alphabeticalSort.isToggled()) {
             isAlphabeticalSort = alphabeticalSort.isToggled();
             ModuleManager.sort();

@@ -20,9 +20,6 @@ public class ModuleManager {
     static List<Module> modules = new ArrayList<>();
     public static List<Module> organizedModules = new ArrayList<>();
 
-    // Dirty-flag: defers sort to avoid O(n² log n) on bulk operations.
-    private static volatile boolean sortDirty = false;
-
     public static Module longJump;
     public static Blink blink;
     public static Module nameHider;
@@ -365,28 +362,11 @@ public class ModuleManager {
         return HUD.getFontRenderer().width(HUD.lowercase.isToggled() ? text.toLowerCase() : text);
     }
 
-    public static void markDirty() {
-        sortDirty = true;
-    }
-
-    /**
-     * Perform sort immediately if dirty. Use {@link #markDirty()} to defer.
-     */
     public static void sort() {
-        sortDirty = false;
         if (HUD.alphabeticalSort.isToggled()) {
             organizedModules.sort(Comparator.comparing(Module::getPrettyName));
         } else {
             organizedModules.sort((c1, c2) -> Double.compare(getWidth(c2), getWidth(c1)));
-        }
-    }
-
-    /**
-     * Sort only if the dirty flag is set - cheap to call every tick.
-     */
-    public static void ensureSorted() {
-        if (sortDirty) {
-            sort();
         }
     }
 }
