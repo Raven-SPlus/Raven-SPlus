@@ -6,7 +6,6 @@ import keystrokesmod.module.impl.client.Notifications;
 import keystrokesmod.module.impl.client.Settings;
 import keystrokesmod.module.setting.Setting;
 import keystrokesmod.module.setting.impl.ButtonSetting;
-import keystrokesmod.module.setting.impl.ModeValue;
 import keystrokesmod.module.setting.impl.SubMode;
 import keystrokesmod.script.Script;
 import keystrokesmod.utility.Utils;
@@ -17,17 +16,16 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.lwjgl.input.Keyboard;
 import org.lwjgl.input.Mouse;
-import scala.reflect.internal.util.WeakHashSet;
 
 import java.util.ArrayList;
-import java.util.Collection;
+import java.util.HashSet;
 import java.util.Iterator;
 
 public class Module {
     private @Nullable I18nModule i18nObject = null;
 
     protected final ArrayList<Setting> settings;
-    private final WeakHashSet<Setting> settingsWeak;
+    private final HashSet<Setting> settingsWeak;
     private final String moduleName;
     private String prettyName;
     private String prettyInfo = "";
@@ -41,6 +39,10 @@ public class Module {
     public boolean ignoreOnSave = false;
     public boolean hidden = false;
     public Script script = null;
+    
+    // Cached formatted pretty name - invalidated when underlying name changes
+    private String cachedPrettyName = null;
+    private String cachedPrettyNameSource = null;
     
     // Silent usage tracking - allows modules to use this module without enabling it
     private final java.util.Set<Module> silentUsers = new java.util.HashSet<>();
@@ -58,7 +60,7 @@ public class Module {
         this.enabled = false;
         mc = Minecraft.getMinecraft();
         this.settings = new ArrayList<>();
-        this.settingsWeak = new WeakHashSet<>();
+        this.settingsWeak = new HashSet<>();
         if (!(this instanceof SubMode))
             Raven.moduleCounter++;
     }
@@ -98,6 +100,8 @@ public class Module {
 
     public void setI18nObject(@Nullable I18nModule i18nObject) {
         this.i18nObject = i18nObject;
+        this.cachedPrettyName = null;
+        this.cachedPrettyNameSource = null;
     }
 
     public ArrayList<Setting> getSettings() {
@@ -201,8 +205,9 @@ public class Module {
         boolean wasActive = this.isActive();
         this.setEnabled(true);
         ModuleManager.organizedModules.add(this);
-        if (ModuleManager.hud.isEnabled()) {
-            ModuleManager.sort();
+        ModuleManager.modulesVersion++;
+        if (ModuleManager.hud != null && ModuleManager.hud.isEnabled()) {
+            ModuleManager.markDirty();
         }
         updateRuntimeState(wasActive);
     }
@@ -214,6 +219,7 @@ public class Module {
         boolean wasActive = this.isActive();
         this.setEnabled(false);
         ModuleManager.organizedModules.remove(this);
+        ModuleManager.modulesVersion++;
         updateRuntimeState(wasActive);
     }
     
@@ -288,8 +294,12 @@ public class Module {
         String name = ModuleManager.customName.isEnabled()
                 ? getRawPrettyName()
                 : i18nObject != null ? i18nObject.getName() : getName();
-        // Format the name if it doesn't already have spaces
-        return Utils.formatModuleName(name);
+        // Cache: formatModuleName is expensive, and names rarely change at runtime.
+        if (cachedPrettyName == null || !name.equals(cachedPrettyNameSource)) {
+            cachedPrettyNameSource = name;
+            cachedPrettyName = Utils.formatModuleName(name);
+        }
+        return cachedPrettyName;
     }
 
     public @Nullable String getToolTip() {
@@ -310,12 +320,14 @@ public class Module {
 
     public final void setPrettyName(String name) {
         this.prettyName = name;
-        ModuleManager.sort();
+        this.cachedPrettyName = null;
+        this.cachedPrettyNameSource = null;
+        ModuleManager.markDirty();
     }
 
     public final void setPrettyInfo(String name) {
         this.prettyInfo = name;
-        ModuleManager.sort();
+        ModuleManager.markDirty();
     }
 
     public void registerSetting(Setting setting) {

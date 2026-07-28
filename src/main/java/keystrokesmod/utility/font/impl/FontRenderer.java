@@ -85,7 +85,6 @@ public class FontRenderer extends CharRenderer implements IFont {
         ColorUtils.setColor(color);
         GlStateManager.enableTexture2D();
         GlStateManager.bindTexture(this.tex.getGlTextureId());
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, this.tex.getGlTextureId());
 
         GlStateManager.enableBlend();
 

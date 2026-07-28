@@ -10,8 +10,14 @@ public final class MemoryFixHelper {
         return ModuleManager.memoryFix != null && ModuleManager.memoryFix.isEnabled();
     }
 
+    /**
+     * Returns true when explicit GC should be BLOCKED.
+     * The default mode (GC_DISABLED / index 0) blocks all explicit GC calls.
+     * Force GC mode (index 1) allows them through as vanilla Minecraft does.
+     */
     public static boolean shouldDisableExplicitGc() {
-        return isMemoryFixEnabled() && ModuleManager.memoryFix.disableExplicitGc.isToggled();
+        if (!isMemoryFixEnabled()) return false;
+        return ModuleManager.memoryFix.gcMode.getInput() == 0; // GC_DISABLED
     }
 
     public static boolean shouldScalePackIcons() {

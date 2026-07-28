@@ -114,9 +114,12 @@ public abstract class MixinMinecraft {
     }
 
     private void maybeRunExplicitGc() {
-        if (!MemoryFixHelper.shouldDisableExplicitGc()) {
-            System.gc();
+        // Default: block explicit GC (stop-the-world hitches).
+        // Users who need the classic Minecraft behavior can set GC mode to "Force GC".
+        if (MemoryFixHelper.shouldDisableExplicitGc()) {
+            return;
         }
+        System.gc();
     }
 
     /**
