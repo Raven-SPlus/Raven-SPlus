@@ -79,10 +79,6 @@ public class HUD extends Module {
     private boolean isAlphabeticalSort;
     private boolean canShowInfo;
 
-    // Cached HUD entries to avoid per-frame rebuilds
-    private List<HudEntry> cachedEntries = null;
-    private int cachedModulesVersion = -1;
-
     public HUD() {
         super("HUD", Module.category.render);
         this.registerSetting(new DescriptionSetting("Right click bind to hide modules."));
@@ -393,18 +389,12 @@ public class HUD extends Module {
     @NotNull
     private List<HudEntry> getDrawEntries() {
         List<Module> modules = ModuleManager.organizedModules;
-        int currentVersion = ModuleManager.modulesVersion;
-        // Rebuild only when the organized module list has changed (enable/disable).
-        if (cachedEntries != null && cachedModulesVersion == currentVersion) {
-            return cachedEntries;
-        }
         List<HudEntry> entries = new ArrayList<>(modules.size());
+
         for (Module module : modules) {
             if (isIgnored(module)) continue;
             entries.add(getHudEntry(module));
         }
-        cachedEntries = entries;
-        cachedModulesVersion = currentVersion;
         return entries;
     }
 

@@ -22,8 +22,6 @@ public class ModuleManager {
 
     // Dirty-flag: defers sort to avoid O(n² log n) on bulk operations.
     private static volatile boolean sortDirty = false;
-    // Version counter bumped on every organizedModules mutation (enable/disable).
-    public static volatile int modulesVersion = 0;
 
     public static Module longJump;
     public static Blink blink;
@@ -369,7 +367,6 @@ public class ModuleManager {
 
     public static void markDirty() {
         sortDirty = true;
-        modulesVersion++;
     }
 
     /**

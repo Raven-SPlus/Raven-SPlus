@@ -205,7 +205,6 @@ public class Module {
         boolean wasActive = this.isActive();
         this.setEnabled(true);
         ModuleManager.organizedModules.add(this);
-        ModuleManager.modulesVersion++;
         if (ModuleManager.hud != null && ModuleManager.hud.isEnabled()) {
             ModuleManager.markDirty();
         }
@@ -219,7 +218,6 @@ public class Module {
         boolean wasActive = this.isActive();
         this.setEnabled(false);
         ModuleManager.organizedModules.remove(this);
-        ModuleManager.modulesVersion++;
         updateRuntimeState(wasActive);
     }
     
