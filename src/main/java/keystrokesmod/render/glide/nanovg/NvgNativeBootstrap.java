@@ -43,14 +43,24 @@ public final class NvgNativeBootstrap {
                 throw new IOException("failed to create native dir: " + extractRoot);
             }
 
-            ClassLoader loader = NvgNativeBootstrap.class.getClassLoader();
+            // Try multiple classloaders: context CL, current CL, system CL.
+            ClassLoader[] loaders = {
+                Thread.currentThread().getContextClassLoader(),
+                NvgNativeBootstrap.class.getClassLoader(),
+                ClassLoader.getSystemClassLoader()
+            };
+            Throwable lastError = null;
+
             for (String[] entry : NATIVE_LIBRARIES) {
                 String subdir = entry[0];
                 String fileName = System.mapLibraryName(entry[1]);
                 String resourcePath = resolveResourcePath(platformDir, subdir, fileName);
                 File extracted = new File(extractRoot, fileName);
                 if (!extracted.exists() || extracted.length() == 0) {
-                    extractResource(loader, resourcePath, extracted);
+                    lastError = extractFromClasspath(loaders, resourcePath, extracted);
+                    if (lastError != null) {
+                        throw lastError;
+                    }
                 }
                 System.load(extracted.getAbsolutePath());
             }
@@ -67,6 +77,26 @@ public final class NvgNativeBootstrap {
             t.printStackTrace();
             return false;
         }
+    }
+
+    private static Throwable extractFromClasspath(ClassLoader[] loaders, String resourcePath, File destination) {
+        for (ClassLoader loader : loaders) {
+            if (loader == null) continue;
+            try (InputStream in = loader.getResourceAsStream(resourcePath)) {
+                if (in != null) {
+                    try (FileOutputStream out = new FileOutputStream(destination)) {
+                        byte[] buffer = new byte[8192];
+                        int read;
+                        while ((read = in.read(buffer)) != -1) {
+                            out.write(buffer, 0, read);
+                        }
+                    }
+                    return null; // success
+                }
+            } catch (IOException ignored) {
+            }
+        }
+        return new IOException("missing native resource stream: " + resourcePath);
     }
 
     public static Throwable getFailure() {
