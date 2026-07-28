@@ -18,8 +18,8 @@ public class MemoryFix extends Module {
         super("MemoryFix", category.client);
         this.registerSetting(
                 gcMode = new ModeValue("GC mode", this,
-                        new SubMode("Disabled", this),   // 0 - safe default
-                        new SubMode("Force GC", this)    // 1 - classic behavior
+                        new SubMode<Module>("Disabled", this) {},   // 0 - safe default
+                        new SubMode<Module>("Force GC", this) {}    // 1 - classic behavior
                 ),
                 scalePackIcons = new ButtonSetting("ScalePackIcons", true),
                 fixCapeLeak = new ButtonSetting("FixCapeLeak", true)
