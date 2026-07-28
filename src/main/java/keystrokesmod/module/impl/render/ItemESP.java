@@ -22,10 +22,6 @@ import java.util.Map;
 public class ItemESP extends Module { // entirely skidded from raven b4 source leak
     private ButtonSetting renderIron, renderGold;
 
-    // Reusable maps to avoid per-frame allocations (cleared between frames).
-    private final HashMap<Item, ArrayList<EntityItem>> itemMap = new HashMap<>();
-    private final HashMap<Double, Integer> stackMap = new HashMap<>();
-
     public ItemESP() {
         super("ItemESP", category.render);
         this.registerSetting(renderIron = new ButtonSetting("Render iron", true));
@@ -34,8 +30,8 @@ public class ItemESP extends Module { // entirely skidded from raven b4 source l
 
     @SubscribeEvent
     public void onRenderWorldLast(RenderWorldLastEvent e) {
-        itemMap.clear();
-        stackMap.clear();
+        HashMap<Item, ArrayList<EntityItem>> hashMap = new HashMap<>();
+        HashMap<Double, Integer> hashMap2 = new HashMap<>();
         for (Entity entity : mc.theWorld.loadedEntityList) {
             if (entity instanceof EntityItem) {
                 if (entity.ticksExisted < 3) {
@@ -51,25 +47,25 @@ public class ItemESP extends Module { // entirely skidded from raven b4 source l
                 }
                 int stackSize = entityItem.getEntityItem().stackSize;
                 double a = a(getItem, entity.posX, entity.posY, entity.posZ);
-                Integer n = stackMap.get(a);
+                Integer n = hashMap2.get(a);
                 int n2;
                 if (n == null) {
                     n2 = stackSize;
-                    ArrayList<EntityItem> list = itemMap.get(getItem);
+                    ArrayList<EntityItem> list = hashMap.get(getItem);
                     if (list == null) {
                         list = new ArrayList<>();
-                        itemMap.put(getItem, list);
                     }
                     list.add(entityItem);
+                    hashMap.put(getItem, list);
                 } else {
                     n2 = n + stackSize;
                 }
-                stackMap.put(a, n2);
+                hashMap2.put(a, n2);
             }
         }
-        if (!itemMap.isEmpty()) {
+        if (!hashMap.isEmpty()) {
             float renderPartialTicks = Utils.getTimer().renderPartialTicks;
-            for (Map.Entry<Item, ArrayList<EntityItem>> entry : itemMap.entrySet()) {
+            for (Map.Entry<Item, ArrayList<EntityItem>> entry : hashMap.entrySet()) {
                 Item item = entry.getKey();
                 int n4;
                 int n3;
@@ -97,7 +93,7 @@ public class ItemESP extends Module { // entirely skidded from raven b4 source l
                     double n9 = mc.thePlayer.lastTickPosY + (mc.thePlayer.posY - mc.thePlayer.lastTickPosY) * renderPartialTicks - n6;
                     double n10 = mc.thePlayer.lastTickPosZ + (mc.thePlayer.posZ - mc.thePlayer.lastTickPosZ) * renderPartialTicks - n7;
                     GlStateManager.pushMatrix();
-                    c(n4, n3, stackMap.get(a2), n5, n6, n7, MathHelper.sqrt_double(n8 * n8 + n9 * n9 + n10 * n10));
+                    c(n4, n3, hashMap2.get(a2), n5, n6, n7, MathHelper.sqrt_double(n8 * n8 + n9 * n9 + n10 * n10));
                     GlStateManager.popMatrix();
                 }
             }
