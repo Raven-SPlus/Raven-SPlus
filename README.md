@@ -12,6 +12,8 @@ Raven B4, but for those who can't afford it.
 
 Raven B4, but not only for Hypixel.
 
+## This client has stopped maintenance. Bugfixes and new feature updates will not be present.
+
 <a href="https://discord.gg/UT57ZW2TVB"><img src="https://invidget.switchblade.xyz/UT57ZW2TVB" alt="https://discord.gg/UT57ZW2TVB"/></a><br>
 
 ![menu](https://raw.githubusercontent.com/Raven-SPlus/Raven-SPlus/refs/heads/master/images/menu.png)
